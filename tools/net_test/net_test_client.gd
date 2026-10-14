@@ -3,6 +3,13 @@ extends Node
 
 const Protocol := preload("res://net/protocol.gd")
 
+# 场景说明：玩家速度(220)远快于敌人(90)，若持续开火会在弹道射程外击杀敌人，
+# 掉落物落在行进线外、超出磁吸半径(90)，永不拾取 → 经验恒 0、无法升级。
+# 故先右移满足位移断言，随后原地等待，仅在敌人贴近(<=FIRE_NEAR)时开火，
+# 使敌人在近身被击杀、掉落落入磁吸范围而被拾取，触发共享经验池升级。
+const MOVE_BEFORE := 1.5
+const FIRE_NEAR := 70.0
+
 var _t := 0.0
 var _connected := false
 var _snapshots := 0
@@ -16,13 +23,6 @@ var _loot_seen := false
 var _level_seen := false
 var _status_seen := false
 var _ip := "127.0.0.1"
-
-# 场景说明：玩家速度(220)远快于敌人(90)，若持续开火会在弹道射程外击杀敌人，
-# 掉落物落在行进线外、超出磁吸半径(90)，永不拾取 → 经验恒 0、无法升级。
-# 故先右移满足位移断言，随后原地等待，仅在敌人贴近(<=FIRE_NEAR)时开火，
-# 使敌人在近身被击杀、掉落落入磁吸范围而被拾取，触发共享经验池升级。
-const MOVE_BEFORE := 1.5
-const FIRE_NEAR := 70.0
 var _self_pos := Vector2.ZERO
 var _have_self := false
 var _nearest_enemy := INF

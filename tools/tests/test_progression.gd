@@ -25,7 +25,11 @@ func run() -> int:
 	var m4 := Progression.apply_card(Progression.default_modifiers(), Progression.card_by_id(1))
 	t.check(absf(m4["cooldown_scale"] - 0.85) < 0.0001, "速射令开火冷却 ×0.85")
 
-	t.eq(Progression.max_hp(Progression.default_modifiers()), Combat.PLAYER_MAX_HP, "默认最大血量 = PLAYER_MAX_HP")
+	t.eq(
+		Progression.max_hp(Progression.default_modifiers()),
+		Combat.PLAYER_MAX_HP,
+		"默认最大血量 = PLAYER_MAX_HP"
+	)
 	var m5 := Progression.apply_card(Progression.default_modifiers(), Progression.card_by_id(2))
 	t.eq(Progression.max_hp(m5), Combat.PLAYER_MAX_HP + 25, "健壮 +25 最大血量")
 

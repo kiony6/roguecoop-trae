@@ -23,7 +23,8 @@ var run_over := false
 var won := false
 var boss_id := 0
 
-var players := {}  # id -> {pos, move, buttons, hp, status, fire_cd, invuln, down_timer, revive_progress, pickups, mods}
+var players := {}  # id -> {pos, move, buttons, hp, status, fire_cd, invuln,
+# down_timer, revive_progress, pickups, mods}
 var enemies := {}  # id -> {pos, hp, kind, touch_cd}
 var loot := {}  # id -> {pos, kind}
 var projectiles := {}  # id -> {pos, vel, ttl, dmg}
@@ -133,14 +134,17 @@ func player_states() -> Array:
 	var out: Array = []
 	for id in peer_ids():
 		var p: Dictionary = players[id]
-		out.append(
-			{
-				"id": id,
-				"pos": p["pos"],
-				"hp": p["hp"],
-				"status": p["status"],
-				"revive01": _revive01(p),
-			}
+		(
+			out
+			. append(
+				{
+					"id": id,
+					"pos": p["pos"],
+					"hp": p["hp"],
+					"status": p["status"],
+					"revive01": _revive01(p),
+				}
+			)
 		)
 	return out
 
@@ -148,13 +152,16 @@ func player_states() -> Array:
 func enemy_states() -> Array:
 	var out: Array = []
 	for id in enemies:
-		out.append(
-			{
-				"id": id,
-				"pos": enemies[id]["pos"],
-				"hp": enemies[id]["hp"],
-				"kind": enemies[id]["kind"],
-			}
+		(
+			out
+			. append(
+				{
+					"id": id,
+					"pos": enemies[id]["pos"],
+					"hp": enemies[id]["hp"],
+					"kind": enemies[id]["kind"],
+				}
+			)
 		)
 	return out
 

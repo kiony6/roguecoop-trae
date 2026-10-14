@@ -98,7 +98,9 @@ func _draw() -> void:
 	if status == Combat.PLAYER_DOWNED:
 		# 救援进度环（顺时针，进度越满越接近救起）
 		var p := float(revive01) / 255.0
-		draw_arc(Vector2.ZERO, RADIUS + 7.0, -PI * 0.5, -PI * 0.5 + TAU * p, 32, Color("7be07b"), 3.0)
+		draw_arc(
+			Vector2.ZERO, RADIUS + 7.0, -PI * 0.5, -PI * 0.5 + TAU * p, 32, Color("7be07b"), 3.0
+		)
 		return
 	var ratio := clampf(float(hp) / float(Combat.PLAYER_MAX_HP), 0.0, 1.0)
 	draw_rect(Rect2(-14.0, -RADIUS - 9.0, 28.0, 3.0), Color(0, 0, 0, 0.5))

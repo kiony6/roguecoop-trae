@@ -54,7 +54,9 @@ func _process(_delta: float) -> void:
 	_update_info()
 
 
-func _on_world_state(_tick: int, meta: Dictionary, players: Array, enemies: Array, loot: Array) -> void:
+func _on_world_state(
+	_tick: int, meta: Dictionary, players: Array, enemies: Array, loot: Array
+) -> void:
 	_level = int(meta.get("level", 1))
 	_xp = int(meta.get("xp", 0))
 	_kills = int(meta.get("kills", 0))

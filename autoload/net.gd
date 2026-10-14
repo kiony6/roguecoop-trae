@@ -226,7 +226,9 @@ func _send_snapshots() -> void:
 		var center: Vector2 = _host.players[peer]["pos"]
 		var culled_enemies := AoI.cull(center, AoI.AOI_RADIUS, enemies)
 		var culled_loot := AoI.cull(center, AoI.AOI_RADIUS, loot)
-		var payload := Protocol.encode_snapshot(_host.tick, meta, players, culled_enemies, culled_loot)
+		var payload := Protocol.encode_snapshot(
+			_host.tick, meta, players, culled_enemies, culled_loot
+		)
 		_rpc_snapshot.rpc_id(peer, _host.tick, payload)
 	_host.snapshot_count += 1
 
@@ -274,7 +276,6 @@ func _broadcast_peer_list() -> void:
 
 
 # ---------------- RPC ----------------
-
 
 @rpc("any_peer", "call_remote", "unreliable_ordered", 1)
 func _rpc_input(_tick_in: int, payload: PackedByteArray) -> void:
