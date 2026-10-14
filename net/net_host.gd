@@ -1,23 +1,38 @@
 extends RefCounted
 ## 主机权威模拟（纯逻辑，不含传输）。由 autoload Net 驱动。
-## M2：在 M1 移动之上叠加敌人 AI、开火/命中裁决、掉落与磁吸拾取。
+## M3：在 M2 战斗之上叠加共享经验池+每人独立选卡、倒地/救援/阵亡、Boss 与结算判定。
 
 const Movement := preload("res://sim/movement.gd")
 const Combat := preload("res://sim/combat.gd")
 const EnemyAI := preload("res://sim/enemy_ai.gd")
+const Progression := preload("res://sim/progression.gd")
 
 var tick := 0
 var snapshot_count := 0
 var local_move := Vector2.ZERO
 var local_buttons := 0
 var spawn_interval := Combat.SPAWN_INTERVAL
-var players := {}  # id -> {pos, move, buttons, hp, fire_cd, touch_cd, pickups}
-var enemies := {}  # id -> {pos, hp, touch_cd}
+
+# —— 队伍成长与结算 ——
+var level := 1
+var xp := 0
+var kills := 0
+var boss_kills := 0
+var elapsed := 0.0
+var run_over := false
+var won := false
+var boss_id := 0
+
+var players := {}  # id -> {pos, move, buttons, hp, status, fire_cd, invuln, down_timer, revive_progress, pickups, mods}
+var enemies := {}  # id -> {pos, hp, kind, touch_cd}
 var loot := {}  # id -> {pos, kind}
-var projectiles := {}  # id -> {pos, vel, ttl}
+var projectiles := {}  # id -> {pos, vel, ttl, dmg}
 
 var _next_id := 1
 var _spawn_accum := 0.0
+var _next_boss_at := Combat.BOSS_EVERY_KILLS
+var _offer := {}  # id -> Array[card_id]，本升级的候选卡
+var _offer_sent := {}  # id -> bool，候选是否已下发
 var _rng := RandomNumberGenerator.new()
 
 
@@ -27,12 +42,23 @@ func reset() -> void:
 	local_move = Vector2.ZERO
 	local_buttons = 0
 	spawn_interval = Combat.SPAWN_INTERVAL
+	level = 1
+	xp = 0
+	kills = 0
+	boss_kills = 0
+	elapsed = 0.0
+	run_over = false
+	won = false
+	boss_id = 0
 	players = {1: _new_player()}
 	enemies = {}
 	loot = {}
 	projectiles = {}
 	_next_id = 1
 	_spawn_accum = 0.0
+	_next_boss_at = Combat.BOSS_EVERY_KILLS
+	_offer = {}
+	_offer_sent = {}
 	_rng.seed = 20261015
 
 
@@ -42,6 +68,8 @@ func add_player(id: int) -> void:
 
 func remove_player(id: int) -> void:
 	players.erase(id)
+	_offer.erase(id)
+	_offer_sent.erase(id)
 
 
 func has_player(id: int) -> bool:
@@ -54,14 +82,32 @@ func set_remote_input(id: int, move: Vector2, buttons: int) -> void:
 		players[id]["buttons"] = buttons
 
 
-func spawn_enemy(pos: Vector2) -> int:
+func spawn_enemy(pos: Vector2, kind: int = Combat.ENEMY_KIND_NORMAL) -> int:
 	var eid := _alloc_id()
-	enemies[eid] = {"pos": pos, "hp": Combat.ENEMY_MAX_HP, "touch_cd": 0.0}
+	enemies[eid] = {
+		"pos": pos,
+		"hp": Combat.enemy_max_hp(kind),
+		"kind": kind,
+		"touch_cd": 0.0,
+	}
+	return eid
+
+
+func spawn_boss() -> int:
+	var anchor := _random_player_pos()
+	var angle := _rng.randf_range(0.0, TAU)
+	var eid := spawn_enemy(
+		anchor + Vector2.RIGHT.rotated(angle) * Combat.SPAWN_RADIUS, Combat.ENEMY_KIND_BOSS
+	)
+	boss_id = eid
 	return eid
 
 
 func physics_step(delta: float) -> void:
+	if run_over:
+		return
 	tick += 1
+	elapsed += delta
 	if players.has(1):
 		players[1]["move"] = local_move
 		players[1]["buttons"] = local_buttons
@@ -69,21 +115,47 @@ func physics_step(delta: float) -> void:
 	_step_firing()
 	_step_projectiles(delta)
 	_step_enemies(delta)
+	_step_downed(delta)
 	_step_loot(delta)
 	_step_spawner(delta)
+	_check_run_over()
+
+
+func meta() -> Dictionary:
+	return {"level": level, "xp": xp, "kills": kills, "boss_kills": boss_kills}
+
+
+func stats() -> Dictionary:
+	return {"kills": kills, "level": level, "boss_kills": boss_kills, "seconds": elapsed}
 
 
 func player_states() -> Array:
 	var out: Array = []
 	for id in peer_ids():
-		out.append({"id": id, "pos": players[id]["pos"], "hp": players[id]["hp"]})
+		var p: Dictionary = players[id]
+		out.append(
+			{
+				"id": id,
+				"pos": p["pos"],
+				"hp": p["hp"],
+				"status": p["status"],
+				"revive01": _revive01(p),
+			}
+		)
 	return out
 
 
 func enemy_states() -> Array:
 	var out: Array = []
 	for id in enemies:
-		out.append({"id": id, "pos": enemies[id]["pos"], "hp": enemies[id]["hp"]})
+		out.append(
+			{
+				"id": id,
+				"pos": enemies[id]["pos"],
+				"hp": enemies[id]["hp"],
+				"kind": enemies[id]["kind"],
+			}
+		)
 	return out
 
 
@@ -103,21 +175,76 @@ func peer_ids() -> PackedInt32Array:
 	return ids
 
 
+# ---------------- 成长（共享经验池 + 每人独立选卡） ----------------
+
+
+func gain_xp(amount: int) -> int:
+	## 加减共享经验池；跨阈值则升级并为本轮所有存活玩家各发一次候选。
+	if amount <= 0:
+		return 0
+	xp += amount
+	var ups := 0
+	while xp >= Progression.xp_to_next(level):
+		xp -= Progression.xp_to_next(level)
+		level += 1
+		ups += 1
+	if ups > 0:
+		_grant_offers()
+	return ups
+
+
+func pending_offer(id: int) -> Array:
+	## 取「尚未下发」的候选卡并标记为已下发；无候选或已下发返回空。
+	if _offer.has(id) and not _offer_sent.get(id, false):
+		_offer_sent[id] = true
+		return _offer[id]
+	return []
+
+
+func apply_choice(id: int, card_id: int) -> bool:
+	## 校验 card_id 是否在本轮候选内；通过则叠加修饰（只作用于该玩家）。
+	if not players.has(id) or not _offer.has(id):
+		return false
+	if not _offer[id].has(card_id):
+		return false
+	var card := Progression.card_by_id(card_id)
+	if card.is_empty():
+		return false
+	var p: Dictionary = players[id]
+	p["mods"] = Progression.apply_card(p["mods"], card)
+	if card.has("max_hp_add"):
+		p["hp"] = mini(p["hp"] + int(card["max_hp_add"]), Progression.max_hp(p["mods"]))
+	_offer.erase(id)
+	_offer_sent.erase(id)
+	return true
+
+
+func _grant_offers() -> void:
+	for id in players:
+		if players[id]["status"] == Combat.PLAYER_DEAD:
+			continue
+		_offer[id] = Progression.draw_choices(_rng, 3)
+		_offer_sent[id] = false
+
+
 # ---------------- 内部步进 ----------------
 
 
 func _step_players(delta: float) -> void:
 	for id in players:
 		var p: Dictionary = players[id]
-		p["pos"] = Movement.step(p["pos"], p["move"], delta)
 		p["fire_cd"] = maxf(0.0, p["fire_cd"] - delta)
-		p["touch_cd"] = maxf(0.0, p["touch_cd"] - delta)
+		if p["status"] != Combat.PLAYER_ALIVE:
+			continue
+		p["pos"] = Movement.step(p["pos"], p["move"], delta)
 
 
 func _step_firing() -> void:
-	var targets := enemy_states()
+	var targets := _enemy_positions()
 	for id in players:
 		var p: Dictionary = players[id]
+		if p["status"] != Combat.PLAYER_ALIVE:
+			continue
 		if (p["buttons"] & 1) == 0:
 			continue
 		if p["fire_cd"] > 0.0:
@@ -125,8 +252,8 @@ func _step_firing() -> void:
 		var dir := Combat.aim_dir(p["pos"], targets)
 		if dir == Vector2.ZERO:
 			continue
-		p["fire_cd"] = Combat.FIRE_COOLDOWN
-		_spawn_projectile(p["pos"], dir)
+		p["fire_cd"] = Combat.FIRE_COOLDOWN * float(p["mods"]["cooldown_scale"])
+		_spawn_projectiles(p["pos"], dir, p["mods"])
 
 
 func _step_projectiles(delta: float) -> void:
@@ -141,12 +268,11 @@ func _step_projectiles(delta: float) -> void:
 			continue
 		for eid in enemies:
 			var e: Dictionary = enemies[eid]
-			var hit := Combat.circle_hit(
-				pr["pos"], Combat.PROJECTILE_RADIUS, e["pos"], Combat.ENEMY_RADIUS
-			)
+			var radius := Combat.enemy_radius(e["kind"])
+			var hit := Combat.circle_hit(pr["pos"], Combat.PROJECTILE_RADIUS, e["pos"], radius)
 			if not hit:
 				continue
-			e["hp"] -= Combat.PROJECTILE_DAMAGE
+			e["hp"] -= int(pr["dmg"])
 			expired.append(pid)
 			if e["hp"] <= 0:
 				killed.append(eid)
@@ -158,39 +284,78 @@ func _step_projectiles(delta: float) -> void:
 
 
 func _step_enemies(delta: float) -> void:
-	var targets := player_states()
+	var targets := _alive_targets()
 	for eid in enemies:
 		var e: Dictionary = enemies[eid]
+		var kind: int = e["kind"]
 		var dir := EnemyAI.chase_dir(e["pos"], targets)
-		e["pos"] = EnemyAI.step(e["pos"], dir, delta)
+		e["pos"] = EnemyAI.step(e["pos"], dir, delta, Combat.enemy_speed(kind))
 		e["touch_cd"] = maxf(0.0, e["touch_cd"] - delta)
 		if e["touch_cd"] > 0.0:
 			continue
+		var radius := Combat.enemy_radius(kind)
 		for id in players:
 			var p: Dictionary = players[id]
-			var touching := Combat.circle_hit(
-				e["pos"], Combat.ENEMY_RADIUS, p["pos"], Combat.PLAYER_RADIUS
-			)
+			if p["status"] != Combat.PLAYER_ALIVE:
+				continue
+			if p["invuln"] > 0.0:
+				continue
+			var touching := Combat.circle_hit(e["pos"], radius, p["pos"], Combat.PLAYER_RADIUS)
 			if not touching:
 				continue
-			p["hp"] = maxi(0, p["hp"] - Combat.ENEMY_TOUCH_DAMAGE)
-			e["touch_cd"] = Combat.ENEMY_TOUCH_INTERVAL
+			p["hp"] = maxi(0, p["hp"] - Combat.enemy_touch_damage(kind))
+			e["touch_cd"] = Combat.enemy_touch_interval(kind)
+			if p["hp"] <= 0:
+				p["status"] = Combat.PLAYER_DOWNED
+				p["down_timer"] = 0.0
+				p["revive_progress"] = 0.0
 			break
+
+
+func _step_downed(delta: float) -> void:
+	for id in players:
+		var p: Dictionary = players[id]
+		if p["invuln"] > 0.0:
+			p["invuln"] = maxf(0.0, p["invuln"] - delta)
+		if p["status"] != Combat.PLAYER_DOWNED:
+			continue
+		p["down_timer"] += delta
+		if p["down_timer"] >= Combat.DOWN_BLEEDOUT:
+			p["status"] = Combat.PLAYER_DEAD
+			p["revive_progress"] = 0.0
+			continue
+		if _count_helpers(id) > 0:
+			p["revive_progress"] += delta
+			if p["revive_progress"] >= Combat.REVIVE_HOLD:
+				p["status"] = Combat.PLAYER_ALIVE
+				p["hp"] = Combat.REVIVE_HP
+				p["invuln"] = Combat.REVIVE_INVULN
+				p["revive_progress"] = 0.0
+				p["down_timer"] = 0.0
+		else:
+			p["revive_progress"] = maxf(0.0, p["revive_progress"] - delta * 2.0)
 
 
 func _step_loot(delta: float) -> void:
 	var picked: Array = []
 	for lid in loot:
 		var l: Dictionary = loot[lid]
-		var owner := _nearest_player_id(l["pos"])
+		var owner := _nearest_alive_player_id(l["pos"])
 		if owner == 0:
 			continue
-		var to_player: Vector2 = players[owner]["pos"] - l["pos"]
+		var p: Dictionary = players[owner]
+		var to_player: Vector2 = p["pos"] - l["pos"]
 		var d := to_player.length()
-		if d <= Combat.PICKUP_RADIUS:
-			players[owner]["pickups"] += 1
+		var pickup_r := Combat.PICKUP_RADIUS + float(p["mods"]["pickup_add"])
+		var magnet_r := Combat.LOOT_MAGNET_RADIUS + float(p["mods"]["pickup_add"])
+		if d <= pickup_r:
+			p["pickups"] += 1
+			gain_xp(Combat.loot_xp(int(l["kind"])))
+			var heal := int(p["mods"]["heal_add"])
+			if heal > 0:
+				p["hp"] = mini(p["hp"] + heal, Progression.max_hp(p["mods"]))
 			picked.append(lid)
-		elif d <= Combat.LOOT_MAGNET_RADIUS:
+		elif d <= magnet_r:
 			l["pos"] = l["pos"] + to_player.normalized() * Combat.LOOT_MAGNET_SPEED * delta
 	for lid in picked:
 		loot.erase(lid)
@@ -198,46 +363,123 @@ func _step_loot(delta: float) -> void:
 
 func _step_spawner(delta: float) -> void:
 	_spawn_accum += delta
-	if _spawn_accum < spawn_interval:
-		return
-	_spawn_accum = 0.0
-	if enemies.size() >= Combat.MAX_ENEMIES:
-		return
-	var ids := players.keys()
-	if ids.is_empty():
-		return
-	var anchor: Vector2 = players[ids[_rng.randi_range(0, ids.size() - 1)]]["pos"]
+	if _spawn_accum >= spawn_interval and enemies.size() < Combat.MAX_ENEMIES:
+		_spawn_accum = 0.0
+		_spawn_normal()
+	if kills >= _next_boss_at and boss_id == 0 and not players.is_empty():
+		spawn_boss()
+		_next_boss_at += Combat.BOSS_EVERY_KILLS
+
+
+# ---------------- 内部辅助 ----------------
+
+
+func _spawn_normal() -> void:
+	var anchor := _random_player_pos()
 	var angle := _rng.randf_range(0.0, TAU)
 	spawn_enemy(anchor + Vector2.RIGHT.rotated(angle) * Combat.SPAWN_RADIUS)
 
 
-func _spawn_projectile(pos: Vector2, dir: Vector2) -> void:
-	var pid := _alloc_id()
-	projectiles[pid] = {
-		"pos": pos,
-		"vel": dir * Combat.PROJECTILE_SPEED,
-		"ttl": Combat.PROJECTILE_TTL,
-	}
+func _spawn_projectiles(pos: Vector2, dir: Vector2, mods: Dictionary) -> void:
+	var n := 1 + int(mods.get("extra_projectiles", 0))
+	var dmg := Combat.PROJECTILE_DAMAGE + int(mods.get("damage_add", 0))
+	var spread := 0.12
+	for i in n:
+		var off := (float(i) - float(n - 1) * 0.5) * spread
+		var d := dir.rotated(off)
+		var pid := _alloc_id()
+		projectiles[pid] = {
+			"pos": pos,
+			"vel": d * Combat.PROJECTILE_SPEED,
+			"ttl": Combat.PROJECTILE_TTL,
+			"dmg": dmg,
+		}
 
 
 func _kill_enemy(eid: int) -> void:
 	if not enemies.has(eid):
 		return
-	var pos: Vector2 = enemies[eid]["pos"]
+	var e: Dictionary = enemies[eid]
+	var pos: Vector2 = e["pos"]
+	var kind: int = e["kind"]
 	enemies.erase(eid)
+	if eid == boss_id:
+		boss_id = 0
+		boss_kills += 1
+	kills += 1
 	var lid := _alloc_id()
-	loot[lid] = {"pos": pos, "kind": 0}
+	var loot_kind := Combat.LOOT_KIND_BIG if kind == Combat.ENEMY_KIND_BOSS else Combat.LOOT_KIND_XP
+	loot[lid] = {"pos": pos, "kind": loot_kind}
 
 
-func _nearest_player_id(pos: Vector2) -> int:
+func _check_run_over() -> void:
+	if run_over:
+		return
+	var any_not_dead := false
+	for id in players:
+		if players[id]["status"] != Combat.PLAYER_DEAD:
+			any_not_dead = true
+			break
+	if not any_not_dead and not players.is_empty():
+		run_over = true
+		won = false
+		return
+	if boss_id == 0 and boss_kills >= Combat.WIN_BOSS_KILLS:
+		run_over = true
+		won = true
+
+
+func _enemy_positions() -> Array:
+	var out: Array = []
+	for id in enemies:
+		out.append({"pos": enemies[id]["pos"]})
+	return out
+
+
+func _alive_targets() -> Array:
+	var out: Array = []
+	for id in players:
+		if players[id]["status"] == Combat.PLAYER_ALIVE:
+			out.append({"pos": players[id]["pos"]})
+	return out
+
+
+func _count_helpers(id: int) -> int:
+	var n := 0
+	var pos: Vector2 = players[id]["pos"]
+	for other in players:
+		if other == id:
+			continue
+		var p: Dictionary = players[other]
+		if p["status"] != Combat.PLAYER_ALIVE:
+			continue
+		if pos.distance_to(p["pos"]) <= Combat.REVIVE_RADIUS:
+			n += 1
+	return n
+
+
+func _revive01(p: Dictionary) -> int:
+	return clampi(roundi(float(p["revive_progress"]) / Combat.REVIVE_HOLD * 255.0), 0, 255)
+
+
+func _nearest_alive_player_id(pos: Vector2) -> int:
 	var best := 0
 	var best_d := INF
 	for id in players:
+		if players[id]["status"] != Combat.PLAYER_ALIVE:
+			continue
 		var d: float = players[id]["pos"].distance_to(pos)
 		if d < best_d:
 			best_d = d
 			best = id
 	return best
+
+
+func _random_player_pos() -> Vector2:
+	var ids := players.keys()
+	if ids.is_empty():
+		return Vector2.ZERO
+	return players[ids[_rng.randi_range(0, ids.size() - 1)]]["pos"]
 
 
 func _alloc_id() -> int:
@@ -251,7 +493,11 @@ func _new_player() -> Dictionary:
 		"move": Vector2.ZERO,
 		"buttons": 0,
 		"hp": Combat.PLAYER_MAX_HP,
+		"status": Combat.PLAYER_ALIVE,
 		"fire_cd": 0.0,
-		"touch_cd": 0.0,
+		"invuln": 0.0,
+		"down_timer": 0.0,
+		"revive_progress": 0.0,
 		"pickups": 0,
+		"mods": Progression.default_modifiers(),
 	}

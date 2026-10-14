@@ -1,9 +1,12 @@
 extends RefCounted
-## 主机权威战斗逻辑测试（纯逻辑，无传输）：
-## 开火→命中→敌人死亡→掉落→磁吸拾取；敌人贴脸造成接触伤害；状态导出结构正确。
+## 主机权威逻辑测试（纯逻辑，无传输）。
+## 覆盖：开火击杀→掉落→拾取、接触伤害、共享经验升级→每人独立选卡、
+## 倒地→救援→复苏、倒地未救→阵亡→失败结算、Boss 生成、Boss 数达标→胜利结算。
 
 const Harness := preload("res://tools/tests/harness.gd")
 const NetHostLogic := preload("res://net/net_host.gd")
+const Combat := preload("res://sim/combat.gd")
+const Progression := preload("res://sim/progression.gd")
 
 
 func run() -> int:
@@ -12,7 +15,7 @@ func run() -> int:
 	# (1) 开火击杀 → 掉落 → 被玩家拾取
 	var h := NetHostLogic.new()
 	h.reset()
-	h.spawn_interval = 9999.0  # 关闭自动生成，隔离本用例
+	h.spawn_interval = 9999.0
 	h.add_player(2)
 	h.set_remote_input(2, Vector2.ZERO, 0)
 	h.spawn_enemy(Vector2(120, 0))
@@ -26,7 +29,7 @@ func run() -> int:
 	var h2 := NetHostLogic.new()
 	h2.reset()
 	h2.spawn_interval = 9999.0
-	h2.loot[1] = {"pos": Vector2(40, 0), "kind": 0}
+	h2.loot[1] = {"pos": Vector2(40, 0), "kind": Combat.LOOT_KIND_XP}
 	for _i in range(60):
 		h2.physics_step(0.016)
 	t.eq(h2.loot.size(), 0, "磁吸范围内掉落被拾取")
@@ -50,7 +53,80 @@ func run() -> int:
 	var ps: Array = h4.player_states()
 	t.eq(ps.size(), 1, "player_states 含 1 人")
 	t.check(ps[0].has("hp"), "player_states 含 hp")
+	t.check(ps[0].has("status"), "player_states 含 status")
 	t.eq(h4.enemy_states().size(), 1, "enemy_states 含 1 敌")
 	t.eq(h4.loot_states().size(), 0, "loot_states 初始为空")
+
+	# (5) 共享经验池 → 升级 → 每人独立候选 → 选卡生效
+	var h5 := NetHostLogic.new()
+	h5.reset()
+	h5.spawn_interval = 9999.0
+	h5.loot[1] = {"pos": Vector2(10, 0), "kind": Combat.LOOT_KIND_XP}
+	h5.loot[2] = {"pos": Vector2(14, 0), "kind": Combat.LOOT_KIND_XP}
+	for _i in range(20):
+		h5.physics_step(0.016)
+	t.check(h5.level >= 2, "拾取 2 个碎片（共 10 经验）后升到 2 级")
+	var offers := h5.pending_offer(1)
+	t.eq(offers.size(), 3, "升级后产生 3 张候选卡")
+	t.eq(h5.pending_offer(1).size(), 0, "同一升级的候选只下发一次")
+	t.check(not h5.apply_choice(1, 999), "不在候选中的卡被拒绝")
+	t.check(h5.apply_choice(1, int(offers[0])), "候选中的卡被接受")
+	t.check(h5.players[1]["mods"] != Progression.default_modifiers(), "选卡后修饰发生变化")
+	t.eq(h5.apply_choice(1, int(offers[0])), false, "同一张卡不能重复选")
+
+	# (6) 倒地：无人救援时被打入倒地状态
+	var h6 := NetHostLogic.new()
+	h6.reset()
+	h6.spawn_interval = 9999.0
+	h6.add_player(2)
+	h6.set_remote_input(2, Vector2.ZERO, 0)
+	h6.players[2]["pos"] = Vector2(1000, 0)
+	h6.spawn_enemy(Vector2(0, 0))
+	for _i in range(480):
+		h6.physics_step(0.016)
+	t.eq(h6.players[1]["status"], Combat.PLAYER_DOWNED, "血量归零进入倒地")
+
+	# (7) 救援：队友贴近 2 秒完成复苏
+	h6.players[2]["pos"] = Vector2(0, 20)
+	for _i in range(140):
+		h6.physics_step(0.016)
+	t.eq(h6.players[1]["status"], Combat.PLAYER_ALIVE, "队友贴近后完成救援")
+	t.eq(h6.players[1]["hp"], Combat.REVIVE_HP, "救起后恢复到固定血量")
+
+	# (8) 倒地未救 → 流血阵亡 → 全员阵亡失败结算
+	var h8 := NetHostLogic.new()
+	h8.reset()
+	h8.spawn_interval = 9999.0
+	h8.spawn_enemy(Vector2(0, 0))
+	for _i in range(480):
+		h8.physics_step(0.016)
+	for _i in range(1400):
+		h8.physics_step(0.016)
+	t.eq(h8.players[1]["status"], Combat.PLAYER_DEAD, "流血完毕永久阵亡")
+	t.check(h8.run_over and not h8.won, "全员阵亡 → 结算失败")
+
+	# (9) Boss：击杀数达阈值刷新 Boss
+	var h9 := NetHostLogic.new()
+	h9.reset()
+	h9.spawn_interval = 9999.0
+	h9.kills = Combat.BOSS_EVERY_KILLS
+	h9.physics_step(0.016)
+	t.check(h9.boss_id != 0, "击杀数达阈值后生成 Boss")
+	t.eq(h9.enemies[h9.boss_id]["kind"], Combat.ENEMY_KIND_BOSS, "生成的敌人 kind = Boss")
+	t.eq(h9.enemies[h9.boss_id]["hp"], Combat.BOSS_MAX_HP, "Boss 初始满血")
+
+	# (10) Boss 数达标 → 胜利结算
+	var h10 := NetHostLogic.new()
+	h10.reset()
+	h10.spawn_interval = 9999.0
+	h10.boss_kills = Combat.WIN_BOSS_KILLS
+	h10.physics_step(0.016)
+	t.check(h10.run_over and h10.won, "击败足够 Boss → 结算胜利")
+
+	# (11) 元数据与统计导出
+	var h11 := NetHostLogic.new()
+	h11.reset()
+	t.eq(h11.meta()["level"], 1, "初始等级 1")
+	t.check(h11.stats().has("seconds"), "stats 含存活时长")
 
 	return t.report("NetHostCombat")
