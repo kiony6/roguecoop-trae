@@ -122,11 +122,27 @@ func send_local_input(move: Vector2, buttons: int) -> void:
 		_client.pending_buttons = buttons
 
 
+func _read_local_move() -> Vector2:
+	return Input.get_vector("move_left", "move_right", "move_up", "move_down")
+
+
+func _read_buttons() -> int:
+	var b := 0
+	if Input.is_action_pressed("fire"):
+		b |= 1
+	if Input.is_action_pressed("dash"):
+		b |= 2
+	return b
+
+
 # ---------------- 主循环 ----------------
 
 
 func _physics_process(delta: float) -> void:
 	if mode == Mode.HOST:
+		# 主机本地玩家的输入在这里采样：不依赖场景树中是否恰好存在玩家节点
+		_host.local_move = _read_local_move()
+		_host.local_buttons = _read_buttons()
 		_host.physics_step(delta)
 		# 本机渲染每物理帧刷新（60Hz），网络快照另行降频
 		world_state.emit(_host.tick, _host.player_states())
