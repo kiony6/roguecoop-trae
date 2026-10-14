@@ -34,10 +34,13 @@ func sample(now_ms: float) -> Vector2:
 	if target >= _times[n - 1]:
 		return _points[n - 1]
 
+	var result := _points[n - 1]
 	for i in range(n - 1):
 		if target >= _times[i] and target <= _times[i + 1]:
 			var span := _times[i + 1] - _times[i]
 			if span <= 0.0:
-				return _points[i]
-			return _points[i].lerp(_points[i + 1], (target - _times[i]) / span)
-	return _points[n - 1]
+				result = _points[i]
+			else:
+				result = _points[i].lerp(_points[i + 1], (target - _times[i]) / span)
+			break
+	return result

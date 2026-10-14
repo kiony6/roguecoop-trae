@@ -7,7 +7,7 @@ var tick := 0
 var snapshot_count := 0
 var local_move := Vector2.ZERO
 var local_buttons := 0
-var players := {}   # id:int -> {pos:Vector2, move:Vector2, buttons:int}
+var players := {}  # id:int -> {pos:Vector2, move:Vector2, buttons:int}
 
 
 func reset() -> void:

@@ -8,14 +8,14 @@ signal player_left(player_id: int)
 signal input_received(player_id: int)
 signal world_state(tick: int, players: Array)
 signal connected_ok(local_id: int)
-signal connection_failed()
-signal disconnected()
+signal connection_failed
+signal disconnected
+
+enum Mode { NONE, HOST, CLIENT }
 
 const Protocol := preload("res://net/protocol.gd")
 const NetHostLogic := preload("res://net/net_host.gd")
 const NetClientLogic := preload("res://net/net_client.gd")
-
-enum Mode { NONE, HOST, CLIENT }
 
 var mode: Mode = Mode.NONE
 var local_id := 0
@@ -46,6 +46,7 @@ func is_client() -> bool:
 
 
 # ---------------- 主机 ----------------
+
 
 func host_start(port: int) -> Error:
 	if mode != Mode.NONE:
@@ -78,6 +79,7 @@ func host_stop() -> void:
 
 # ---------------- 客户端 ----------------
 
+
 func client_connect(address: String, port: int) -> Error:
 	if mode != Mode.NONE:
 		return ERR_ALREADY_IN_USE
@@ -107,6 +109,7 @@ func client_disconnect() -> void:
 
 # ---------------- 对外输入 ----------------
 
+
 func send_local_input(move: Vector2, buttons: int) -> void:
 	var dir := move
 	if dir.length() > 1.0:
@@ -120,6 +123,7 @@ func send_local_input(move: Vector2, buttons: int) -> void:
 
 
 # ---------------- 主循环 ----------------
+
 
 func _physics_process(delta: float) -> void:
 	if mode == Mode.HOST:
@@ -135,8 +139,11 @@ func _physics_process(delta: float) -> void:
 		if _send_accum >= 1.0 / float(Protocol.INPUT_RATE):
 			_send_accum = 0.0
 			_client.tick += 1
-			_rpc_input.rpc_id(1, _client.tick, Protocol.encode_input(
-				_client.pending_move, Vector2.RIGHT, _client.pending_buttons))
+			_rpc_input.rpc_id(
+				1,
+				_client.tick,
+				Protocol.encode_input(_client.pending_move, Vector2.RIGHT, _client.pending_buttons)
+			)
 
 
 func _send_snapshot() -> void:
@@ -146,6 +153,7 @@ func _send_snapshot() -> void:
 
 
 # ---------------- 连接事件 ----------------
+
 
 func _on_peer_connected(id: int) -> void:
 	if mode != Mode.HOST:
@@ -203,7 +211,7 @@ func _rpc_input(_tick_in: int, payload: PackedByteArray) -> void:
 
 
 @rpc("authority", "call_remote", "unreliable_ordered", 1)
-func _rpc_snapshot(tick_in: int, payload: PackedByteArray) -> void:
+func _rpc_snapshot(_tick_in: int, payload: PackedByteArray) -> void:
 	if mode != Mode.CLIENT:
 		return
 	var snap := Protocol.decode_snapshot(payload)

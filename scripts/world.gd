@@ -4,12 +4,16 @@ extends Node2D
 const PlayerScript := preload("res://scripts/player.gd")
 
 const COLORS: Array[Color] = [
-	Color("4aa3ff"), Color("ff7a59"), Color("ffd93d"), Color("7be07b"),
+	Color("4aa3ff"),
+	Color("ff7a59"),
+	Color("ffd93d"),
+	Color("7be07b"),
 ]
 
-@onready var _info: Label = $Hud/Info
-
 var _nodes := {}
+
+
+@onready var _info: Label = $Hud/Info
 
 
 func _ready() -> void:

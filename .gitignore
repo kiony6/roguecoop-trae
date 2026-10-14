@@ -1,0 +1,16 @@
+# Godot 4
+.godot/
+/android/
+
+# 构建输出
+build/
+exports/
+
+# 操作系统元数据
+.DS_Store
+Thumbs.db
+
+# 测试产物
+tools/net_test/*.log
+tools/net_test/*.err
+tools/net_test/out/

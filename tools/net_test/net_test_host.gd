@@ -45,6 +45,10 @@ func _process(delta: float) -> void:
 		print("[NetTest-Host] PASS remote_input=1 two_players=1 client_moved=1")
 		get_tree().quit(0)
 	elif _t > 20.0:
-		printerr("[NetTest-Host] FAIL timeout remote_input=%s two_players=%s moved=%s"
-			% [_remote_input, _saw_two, _client_moved])
+		printerr(
+			(
+				"[NetTest-Host] FAIL timeout remote_input=%s two_players=%s moved=%s"
+				% [_remote_input, _saw_two, _client_moved]
+			)
+		)
 		get_tree().quit(1)

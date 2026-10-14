@@ -61,10 +61,18 @@ func _on_state(_tick: int, players: Array) -> void:
 func _process(delta: float) -> void:
 	_t += delta
 	if _connected and _snapshots >= 10 and _saw_two and _self_seen and _self_moved:
-		print("[NetTest-Client] PASS local_id=%d snapshots=%d two_players=1 moved=1"
-			% [Net.local_id, _snapshots])
+		print(
+			(
+				"[NetTest-Client] PASS local_id=%d snapshots=%d two_players=1 moved=1"
+				% [Net.local_id, _snapshots]
+			)
+		)
 		get_tree().quit(0)
 	elif _t > 20.0:
-		printerr("[NetTest-Client] FAIL timeout connected=%s snapshots=%d two=%s self=%s moved=%s"
-			% [_connected, _snapshots, _saw_two, _self_seen, _self_moved])
+		printerr(
+			(
+				"[NetTest-Client] FAIL timeout connected=%s snapshots=%d two=%s self=%s moved=%s"
+				% [_connected, _snapshots, _saw_two, _self_seen, _self_moved]
+			)
+		)
 		get_tree().quit(1)

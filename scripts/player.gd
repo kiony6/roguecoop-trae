@@ -6,8 +6,8 @@ extends Node2D
 const Interp := preload("res://net/interp.gd")
 const Movement := preload("res://sim/movement.gd")
 
-const CORRECT_RATE := 10.0   # 软校正速率
-const SNAP_DIST := 140.0     # 误差超过该距离直接硬吸附
+const CORRECT_RATE := 10.0  # 软校正速率
+const SNAP_DIST := 140.0  # 误差超过该距离直接硬吸附
 const RADIUS := 14.0
 
 var player_id := 0
