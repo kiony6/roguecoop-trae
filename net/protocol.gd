@@ -1,21 +1,25 @@
 extends RefCounted
-## 网络协议常量与二进制编解码（M2）。
+## 网络协议常量与二进制编解码（M3）。
 ## 全部静态方法，无实例状态。
 ## 输入帧：5 字节。
-## 快照：u32 tick | u8 pc | pc*13 | u8 ec | ec*13 | u8 lc | lc*13 = 7 + pc*13 + ec*13 + lc*13。
+## 快照头：u32 tick | u8 level | u16 xp | u16 kills | u8 pc | u8 ec | u8 lc = 12 字节
+## 玩家段：u32 id | f32 x | f32 y | u8 hp | u8 status | u8 revive01 = 15 字节
+## 敌人段：u32 id | f32 x | f32 y | u8 hp | u8 kind = 14 字节
+## 掉落段：u32 id | f32 x | f32 y | u8 kind = 13 字节
 
 const PROTOCOL_VERSION := 1
 const DEFAULT_PORT := 25600
-const MAX_PLAYERS := 4  # 协议上限（M1/M2 实际按 2 人验收）
+const MAX_PLAYERS := 4  # 协议上限（实际按 2 人验收）
 const INPUT_RATE := 30  # 客户端输入上报 Hz
 const SNAPSHOT_RATE := 20  # 主机快照广播 Hz
 const CH_CONTROL := 0  # 可靠通道
 const CH_DATA := 1  # 不可靠有序通道
 
 const INPUT_BYTES := 5
-const PLAYER_BYTES := 13  # u32 id | f32 x | f32 y | u8 hp
-const ENEMY_BYTES := 13  # u32 id | f32 x | f32 y | u8 hp
-const LOOT_BYTES := 13  # u32 id | f32 x | f32 y | u8 kind
+const HEADER_BYTES := 12
+const PLAYER_BYTES := 15
+const ENEMY_BYTES := 14
+const LOOT_BYTES := 13
 
 # ---------------- 输入帧 ----------------
 # 布局: i8 move_x | i8 move_y | i8 aim_x | i8 aim_y | u8 buttons
@@ -43,25 +47,31 @@ static func decode_input(b: PackedByteArray) -> Dictionary:
 
 # ---------------- 快照 ----------------
 # 布局: u32 tick
-#     | u8 pc | pc*(u32 id | f32 x | f32 y | u8 hp)
-#     | u8 ec | ec*(u32 id | f32 x | f32 y | u8 hp)
+#     | u8 level | u16 xp | u16 kills | u8 pc
+#     | pc*(u32 id | f32 x | f32 y | u8 hp | u8 status | u8 revive01)
+#     | u8 ec | ec*(u32 id | f32 x | f32 y | u8 hp | u8 kind)
 #     | u8 lc | lc*(u32 id | f32 x | f32 y | u8 kind)
 # 注意：Godot 4 的对端 unique_id 为随机大整数（可达 2^31），实体 id 一律 u32。
 
 
 static func encode_snapshot(
-	tick: int, players: Array, enemies: Array = [], loot: Array = []
+	tick: int, meta: Dictionary, players: Array, enemies: Array = [], loot: Array = []
 ) -> PackedByteArray:
 	var b := PackedByteArray()
 	b.resize(snapshot_size(players.size(), enemies.size(), loot.size()))
 	b.encode_u32(0, tick)
-	b[4] = players.size()
-	var o := 5
+	b[4] = int(meta.get("level", 1)) & 0xFF
+	b.encode_u16(5, int(meta.get("xp", 0)))
+	b.encode_u16(7, int(meta.get("kills", 0)))
+	b[9] = players.size()
+	var o := 10
 	for p in players:
 		b.encode_u32(o, int(p["id"]))
 		b.encode_float(o + 4, float(p["pos"].x))
 		b.encode_float(o + 8, float(p["pos"].y))
 		b[o + 12] = int(p.get("hp", 100)) & 0xFF
+		b[o + 13] = int(p.get("status", 0)) & 0xFF
+		b[o + 14] = int(p.get("revive01", 0)) & 0xFF
 		o += PLAYER_BYTES
 	b[o] = enemies.size()
 	o += 1
@@ -70,6 +80,7 @@ static func encode_snapshot(
 		b.encode_float(o + 4, float(e["pos"].x))
 		b.encode_float(o + 8, float(e["pos"].y))
 		b[o + 12] = int(e.get("hp", 0)) & 0xFF
+		b[o + 13] = int(e.get("kind", 0)) & 0xFF
 		o += ENEMY_BYTES
 	b[o] = loot.size()
 	o += 1
@@ -83,10 +94,15 @@ static func encode_snapshot(
 
 
 static func decode_snapshot(b: PackedByteArray) -> Dictionary:
-	assert(b.size() >= 5, "snapshot too short")
+	assert(b.size() >= HEADER_BYTES, "snapshot too short")
+	var meta := {
+		"level": b[4],
+		"xp": b.decode_u16(5),
+		"kills": b.decode_u16(7),
+	}
 	var players: Array = []
-	var pc: int = b[4]
-	var o := 5
+	var pc: int = b[9]
+	var o := 10
 	for _i in pc:
 		if o + PLAYER_BYTES > b.size():
 			break
@@ -97,6 +113,8 @@ static func decode_snapshot(b: PackedByteArray) -> Dictionary:
 					"id": b.decode_u32(o),
 					"pos": Vector2(b.decode_float(o + 4), b.decode_float(o + 8)),
 					"hp": b[o + 12],
+					"status": b[o + 13],
+					"revive01": b[o + 14],
 				}
 			)
 		)
@@ -115,6 +133,7 @@ static func decode_snapshot(b: PackedByteArray) -> Dictionary:
 						"id": b.decode_u32(o),
 						"pos": Vector2(b.decode_float(o + 4), b.decode_float(o + 8)),
 						"hp": b[o + 12],
+						"kind": b[o + 13],
 					}
 				)
 			)
@@ -137,11 +156,17 @@ static func decode_snapshot(b: PackedByteArray) -> Dictionary:
 				)
 			)
 			o += LOOT_BYTES
-	return {"tick": b.decode_u32(0), "players": players, "enemies": enemies, "loot": loot}
+	return {
+		"tick": b.decode_u32(0),
+		"meta": meta,
+		"players": players,
+		"enemies": enemies,
+		"loot": loot,
+	}
 
 
 static func snapshot_size(pc: int, ec: int = 0, lc: int = 0) -> int:
-	return 7 + pc * PLAYER_BYTES + ec * ENEMY_BYTES + lc * LOOT_BYTES
+	return HEADER_BYTES + pc * PLAYER_BYTES + ec * ENEMY_BYTES + lc * LOOT_BYTES
 
 
 # ---------------- 量化辅助 ----------------
