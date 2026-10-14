@@ -1,0 +1,30 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
+
+[node name="Main" type="Control"]
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("1_main")
+
+[node name="Panel" type="VBoxContainer" parent="."]
+offset_left = 480.0
+offset_top = 280.0
+offset_right = 800.0
+offset_bottom = 460.0
+
+[node name="Title" type="Label" parent="Panel"]
+text = "RogueCoop · 肉鸽多人联机"
+
+[node name="IpField" type="LineEdit" parent="Panel"]
+text = "127.0.0.1"
+placeholder_text = "主机 IP"
+
+[node name="HostButton" type="Button" parent="Panel"]
+text = "建立主机"
+
+[node name="JoinButton" type="Button" parent="Panel"]
+text = "加入主机"
+
+[node name="Status" type="Label" parent="Panel"]
+text = ""
