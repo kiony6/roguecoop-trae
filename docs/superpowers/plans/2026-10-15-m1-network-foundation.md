@@ -1,6 +1,6 @@
 # M1 联机地基 实现计划
 
-> **给自动化执行者：** 本计划的每一步都用复选框（`- [ ]`）跟踪。按任务顺序逐条执行，不要跳步。
+> **给自动化执行者：** 本计划的每一步都用复选框（`- [x]`）跟踪。按任务顺序逐条执行，不要跳步。
 
 **目标：** 在 `D:\games\RogueCoop`（Godot 4.7 + GDScript）中落地 M1 联机地基——房主创建房间、客户端加入、客户端 30Hz 上报输入、主机权威模拟、快照广播、玩家位置同步与远端插值，并用「1 主机 + 1 客户端」双 headless 实例做自动化联机断言。
 
@@ -55,7 +55,7 @@
 - Create: `tools/tests/run_tests.gd`
 - Create: `tools/tests/run_tests.tscn`
 
-- [ ] **Step 1: 写断言器 `tools/tests/harness.gd`**
+- [x] **Step 1: 写断言器 `tools/tests/harness.gd`**
 
 ```gdscript
 extends RefCounted
@@ -86,7 +86,7 @@ func report(suite: String) -> int:
 	return failed
 ```
 
-- [ ] **Step 2: 写测试入口 `tools/tests/run_tests.gd`**
+- [x] **Step 2: 写测试入口 `tools/tests/run_tests.gd`**
 
 ```gdscript
 extends Node
@@ -112,7 +112,7 @@ func _ready() -> void:
 		get_tree().quit(1)
 ```
 
-- [ ] **Step 3: 写测试入口场景 `tools/tests/run_tests.tscn`**
+- [x] **Step 3: 写测试入口场景 `tools/tests/run_tests.tscn`**
 
 ```
 [gd_scene load_steps=2 format=3]
@@ -123,7 +123,7 @@ func _ready() -> void:
 script = ExtResource("1_run")
 ```
 
-- [ ] **Step 4: 暂缺套件时先跑一次（预期失败）**
+- [x] **Step 4: 暂缺套件时先跑一次（预期失败）**
 
 Run:
 ```powershell
@@ -131,7 +131,7 @@ Run:
 ```
 Expected: 报错（`preload` 找不到 `test_*.gd`），exit 非 0。这证明入口已生效。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```powershell
 git -C D:\games\RogueCoop add tools/tests
@@ -146,7 +146,7 @@ git -C D:\games\RogueCoop commit -m "test: 加入极简单元测试脚手架"
 - Create: `net/protocol.gd`
 - Create: `tools/tests/test_protocol_input.gd`
 
-- [ ] **Step 1: 写失败测试 `tools/tests/test_protocol_input.gd`**
+- [x] **Step 1: 写失败测试 `tools/tests/test_protocol_input.gd`**
 
 ```gdscript
 extends RefCounted
@@ -178,7 +178,7 @@ func run() -> int:
 	return t.report("ProtocolInput")
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run:
 ```powershell
@@ -186,7 +186,7 @@ Run:
 ```
 Expected: FAIL —— `res://net/protocol.gd` 无法解析。
 
-- [ ] **Step 3: 实现 `net/protocol.gd`**
+- [x] **Step 3: 实现 `net/protocol.gd`**
 
 ```gdscript
 extends RefCounted
@@ -279,7 +279,7 @@ static func _dequant8(raw: int) -> float:
 	return float(v) / 127.0
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run:
 ```powershell
@@ -287,7 +287,7 @@ Run:
 ```
 Expected: 含 `[ProtocolInput] passed=8 failed=0`（其余套件此时仍缺，先忽略）。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```powershell
 git -C D:\games\RogueCoop add net/protocol.gd tools/tests/test_protocol_input.gd
@@ -302,7 +302,7 @@ git -C D:\games\RogueCoop commit -m "feat(net): 协议常量与输入帧二进�
 - Modify: `net/protocol.gd`（Task 2 已写入快照部分，本任务只补测试）
 - Create: `tools/tests/test_protocol_snapshot.gd`
 
-- [ ] **Step 1: 写失败测试 `tools/tests/test_protocol_snapshot.gd`**
+- [x] **Step 1: 写失败测试 `tools/tests/test_protocol_snapshot.gd`**
 
 ```gdscript
 extends RefCounted
@@ -338,7 +338,7 @@ func run() -> int:
 	return t.report("ProtocolSnapshot")
 ```
 
-- [ ] **Step 2: 跑测试**
+- [x] **Step 2: 跑测试**
 
 Run:
 ```powershell
@@ -346,7 +346,7 @@ Run:
 ```
 Expected: `[ProtocolSnapshot] passed=9 failed=0`。
 
-- [ ] **Step 3: 提交**
+- [x] **Step 3: 提交**
 
 ```powershell
 git -C D:\games\RogueCoop add tools/tests/test_protocol_snapshot.gd
@@ -361,7 +361,7 @@ git -C D:\games\RogueCoop commit -m "test(net): 快照编解码用例"
 - Create: `sim/movement.gd`
 - Create: `tools/tests/test_movement.gd`
 
-- [ ] **Step 1: 写失败测试 `tools/tests/test_movement.gd`**
+- [x] **Step 1: 写失败测试 `tools/tests/test_movement.gd`**
 
 ```gdscript
 extends RefCounted
@@ -390,7 +390,7 @@ func run() -> int:
 	return t.report("Movement")
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run:
 ```powershell
@@ -398,7 +398,7 @@ Run:
 ```
 Expected: FAIL —— `res://sim/movement.gd` 无法解析。
 
-- [ ] **Step 3: 实现 `sim/movement.gd`**
+- [x] **Step 3: 实现 `sim/movement.gd`**
 
 ```gdscript
 extends RefCounted
@@ -415,7 +415,7 @@ static func step(pos: Vector2, move: Vector2, delta: float) -> Vector2:
 	return pos + dir * SPEED * delta
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run:
 ```powershell
@@ -423,7 +423,7 @@ Run:
 ```
 Expected: `[Movement] passed=6 failed=0`。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```powershell
 git -C D:\games\RogueCoop add sim/movement.gd tools/tests/test_movement.gd
@@ -438,7 +438,7 @@ git -C D:\games\RogueCoop commit -m "feat(sim): 权威移动步进与用例"
 - Create: `net/interp.gd`
 - Create: `tools/tests/test_interp.gd`
 
-- [ ] **Step 1: 写失败测试 `tools/tests/test_interp.gd`**
+- [x] **Step 1: 写失败测试 `tools/tests/test_interp.gd`**
 
 ```gdscript
 extends RefCounted
@@ -478,7 +478,7 @@ func run() -> int:
 	return t.report("Interp")
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run:
 ```powershell
@@ -486,7 +486,7 @@ Run:
 ```
 Expected: FAIL —— `res://net/interp.gd` 无法解析。
 
-- [ ] **Step 3: 实现 `net/interp.gd`**
+- [x] **Step 3: 实现 `net/interp.gd`**
 
 ```gdscript
 extends RefCounted
@@ -534,7 +534,7 @@ func sample(now_ms: float) -> Vector2:
 	return _points[n - 1]
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run:
 ```powershell
@@ -542,7 +542,7 @@ Run:
 ```
 Expected: `[Interp] passed=6 failed=0`，且末尾 `[UnitTests] ALL PASS`，exit 0。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```powershell
 git -C D:\games\RogueCoop add net/interp.gd tools/tests/test_interp.gd
@@ -557,7 +557,7 @@ git -C D:\games\RogueCoop commit -m "feat(net): 远端玩家插值器与用例"
 - Create: `net/net_host.gd`
 - Create: `net/net_client.gd`
 
-- [ ] **Step 1: 实现 `net/net_host.gd`**
+- [x] **Step 1: 实现 `net/net_host.gd`**
 
 ```gdscript
 extends RefCounted
@@ -628,7 +628,7 @@ func _new_player() -> Dictionary:
 	return {"pos": Vector2.ZERO, "move": Vector2.ZERO, "buttons": 0}
 ```
 
-- [ ] **Step 2: 实现 `net/net_client.gd`**
+- [x] **Step 2: 实现 `net/net_client.gd`**
 
 ```gdscript
 extends RefCounted
@@ -649,7 +649,7 @@ func reset() -> void:
 	pending_buttons = 0
 ```
 
-- [ ] **Step 3: 语法自检**
+- [x] **Step 3: 语法自检**
 
 Run:
 ```powershell
@@ -658,7 +658,7 @@ Run:
 ```
 Expected: 两条均无输出错误，exit 0。
 
-- [ ] **Step 4: 提交**
+- [x] **Step 4: 提交**
 
 ```powershell
 git -C D:\games\RogueCoop add net/net_host.gd net/net_client.gd
@@ -676,7 +676,7 @@ git -C D:\games\RogueCoop commit -m "feat(net): 主机权威模拟与客户端�
 
 > **关键设计约束：** 所有 `@rpc` 方法只挂在 autoload `Net` 这一棵节点上。Godot 的 RPC 按 **节点路径** 解析，主机与客户端的 `/root/Net` 路径一致，才能互相解析到方法。不要把 `@rpc` 分散到 `net_host.gd` / `net_client.gd`（它们是 `RefCounted`，不是节点）。
 
-- [ ] **Step 1: 实现 `autoload/boot.gd`**
+- [x] **Step 1: 实现 `autoload/boot.gd`**
 
 ```gdscript
 extends Node
@@ -709,7 +709,7 @@ func _ready() -> void:
 	InputMap.action_add_event("fire", mb)
 ```
 
-- [ ] **Step 2: 实现 `autoload/net.gd`**
+- [x] **Step 2: 实现 `autoload/net.gd`**
 
 ```gdscript
 extends Node
@@ -943,7 +943,7 @@ func _rpc_peer_list(ids: PackedInt32Array) -> void:
 			player_left.emit(id)
 ```
 
-- [ ] **Step 3: 语法自检**
+- [x] **Step 3: 语法自检**
 
 Run:
 ```powershell
@@ -952,7 +952,7 @@ Run:
 ```
 Expected: 均无错误，exit 0。
 
-- [ ] **Step 4: 在 `project.godot` 追加 autoload 段**
+- [x] **Step 4: 在 `project.godot` 追加 autoload 段**
 
 用编辑器打开 `D:\games\RogueCoop\project.godot`，在 `[application]` 段之后插入：
 
@@ -965,7 +965,7 @@ Net="*res://autoload/net.gd"
 
 > 前缀 `*` 表示启用（单例）。`Boot` 必须排在 `Net` 之前。
 
-- [ ] **Step 5: 验证 autoload 生效**
+- [x] **Step 5: 验证 autoload 生效**
 
 Run:
 ```powershell
@@ -973,7 +973,7 @@ Run:
 ```
 Expected: 打印 `[RogueCoop] boot ok ...`，exit 0，且无 autoload 报错。
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```powershell
 git -C D:\games\RogueCoop add autoload/net.gd autoload/boot.gd project.godot
@@ -991,7 +991,7 @@ git -C D:\games\RogueCoop commit -m "feat(net): Net 门面（RPC/信号/生命�
 - Modify: `scripts/main.gd`
 - Modify: `scenes/main.tscn`
 
-- [ ] **Step 1: 实现 `scripts/player.gd`**
+- [x] **Step 1: 实现 `scripts/player.gd`**
 
 ```gdscript
 extends Node2D
@@ -1075,7 +1075,7 @@ func _draw() -> void:
 		draw_arc(Vector2.ZERO, RADIUS + 4.0, 0.0, TAU, 24, color.lightened(0.4), 1.0)
 ```
 
-- [ ] **Step 2: 实现 `scripts/world.gd`**
+- [x] **Step 2: 实现 `scripts/world.gd`**
 
 ```gdscript
 extends Node2D
@@ -1136,7 +1136,7 @@ func _update_info() -> void:
 	_info.text = "%s | 在线 %d 人 | WASD 移动" % [role, _nodes.size()]
 ```
 
-- [ ] **Step 3: 写 `scenes/world.tscn`**
+- [x] **Step 3: 写 `scenes/world.tscn`**
 
 ```
 [gd_scene load_steps=2 format=3]
@@ -1158,7 +1158,7 @@ offset_bottom = 40.0
 text = ""
 ```
 
-- [ ] **Step 4: 覆写 `scripts/main.gd`**
+- [x] **Step 4: 覆写 `scripts/main.gd`**
 
 ```gdscript
 extends Control
@@ -1204,7 +1204,7 @@ func _on_connection_failed() -> void:
 	_status.text = "连接失败（主机未开或网络不通）"
 ```
 
-- [ ] **Step 5: 覆写 `scenes/main.tscn`**
+- [x] **Step 5: 覆写 `scenes/main.tscn`**
 
 ```
 [gd_scene load_steps=2 format=3]
@@ -1239,7 +1239,7 @@ text = "加入主机"
 text = ""
 ```
 
-- [ ] **Step 6: 冒烟验证主菜单可启动**
+- [x] **Step 6: 冒烟验证主菜单可启动**
 
 Run:
 ```powershell
@@ -1247,7 +1247,7 @@ Run:
 ```
 Expected: 无脚本报错，exit 0。
 
-- [ ] **Step 7: 提交**
+- [x] **Step 7: 提交**
 
 ```powershell
 git -C D:\games\RogueCoop add scripts/player.gd scripts/world.gd scenes/world.tscn scripts/main.gd scenes/main.tscn
@@ -1269,7 +1269,7 @@ git -C D:\games\RogueCoop commit -m "feat(game): 主菜单/世界场景与玩家
 - 主机侧断言：① 收到远端输入（`input_received`）；② 快照里出现 2 个玩家；③ 远端玩家 x 坐标相对首个采样右移 > 30px。
 - 客户端侧断言：① 连上并拿到 `local_id`；② 收到 ≥ 10 个快照；③ 快照含 2 名玩家；④ 快照含自己；⑤ 自己的权威 x 相对首个采样右移 > 30px。
 
-- [ ] **Step 1: 实现 `tools/net_test/net_test_host.gd`**
+- [x] **Step 1: 实现 `tools/net_test/net_test_host.gd`**
 
 ```gdscript
 extends Node
@@ -1322,7 +1322,7 @@ func _process(delta: float) -> void:
 		get_tree().quit(1)
 ```
 
-- [ ] **Step 2: 写 `tools/net_test/net_test_host.tscn`**
+- [x] **Step 2: 写 `tools/net_test/net_test_host.tscn`**
 
 ```
 [gd_scene load_steps=2 format=3]
@@ -1333,7 +1333,7 @@ func _process(delta: float) -> void:
 script = ExtResource("1_host")
 ```
 
-- [ ] **Step 3: 实现 `tools/net_test/net_test_client.gd`**
+- [x] **Step 3: 实现 `tools/net_test/net_test_client.gd`**
 
 ```gdscript
 extends Node
@@ -1408,7 +1408,7 @@ func _process(delta: float) -> void:
 		get_tree().quit(1)
 ```
 
-- [ ] **Step 4: 写 `tools/net_test/net_test_client.tscn`**
+- [x] **Step 4: 写 `tools/net_test/net_test_client.tscn`**
 
 ```
 [gd_scene load_steps=2 format=3]
@@ -1419,7 +1419,7 @@ func _process(delta: float) -> void:
 script = ExtResource("1_client")
 ```
 
-- [ ] **Step 5: 实现 `tools/net_test/run_net_test.ps1`**
+- [x] **Step 5: 实现 `tools/net_test/run_net_test.ps1`**
 
 ```powershell
 $ErrorActionPreference = "Stop"
@@ -1466,7 +1466,7 @@ if (Test-Path $cliErr)  { Write-Host "--- client.err ---"; Get-Content $cliErr }
 exit 1
 ```
 
-- [ ] **Step 6: 跑联机测试**
+- [x] **Step 6: 跑联机测试**
 
 Run:
 ```powershell
@@ -1476,7 +1476,7 @@ Expected: 打印 host 与 client 的 `PASS` 行，末尾 `[NetTest] ALL PASS`，
 
 > 若 30s 超时：先看 `%TEMP%\roguecoop_nettest\host.err` / `client.err` 报错（autoload、RPC 路径、端口占用是三个常见根因）；端口冲突时改 `Protocol.DEFAULT_PORT` 后重跑。
 
-- [ ] **Step 7: 提交**
+- [x] **Step 7: 提交**
 
 ```powershell
 git -C D:\games\RogueCoop add tools/net_test
@@ -1491,7 +1491,7 @@ git -C D:\games\RogueCoop commit -m "test(net): 双实例 headless 联机冒烟�
 - Modify: `.gitignore`
 - Modify: 全部 `*.gd`（格式化）
 
-- [ ] **Step 1: 格式化全部 GDScript**
+- [x] **Step 1: 格式化全部 GDScript**
 
 Run:
 ```powershell
@@ -1499,7 +1499,7 @@ gdformat D:\games\RogueCoop\net D:\games\RogueCoop\sim D:\games\RogueCoop\autolo
 ```
 Expected: 输出被改写/未改写的文件列表，无异常。
 
-- [ ] **Step 2: 静态检查**
+- [x] **Step 2: 静态检查**
 
 Run:
 ```powershell
@@ -1507,7 +1507,7 @@ gdlint D:\games\RogueCoop\net D:\games\RogueCoop\sim D:\games\RogueCoop\autoload
 ```
 Expected: 无 error 级别问题。若有 `unused-argument` / `max-line-length` 一类告警，按提示修正或加行内 `# gdlint:ignore` 注释。
 
-- [ ] **Step 3: 回归：单元测试 + 联机测试都通过**
+- [x] **Step 3: 回归：单元测试 + 联机测试都通过**
 
 Run:
 ```powershell
@@ -1516,7 +1516,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File D:\games\RogueCoop\tools\net
 ```
 Expected: 前者 `[UnitTests] ALL PASS` exit 0；后者 `[NetTest] ALL PASS` exit 0。
 
-- [ ] **Step 4: 追加 `.gitignore`**
+- [x] **Step 4: 追加 `.gitignore`**
 
 在 `D:\games\RogueCoop\.gitignore` 末尾追加：
 
@@ -1527,7 +1527,7 @@ tools/net_test/*.err
 tools/net_test/out/
 ```
 
-- [ ] **Step 5: 最终提交**
+- [x] **Step 5: 最终提交**
 
 ```powershell
 git -C D:\games\RogueCoop add -A
@@ -1535,7 +1535,7 @@ git -C D:\games\RogueCoop commit -m "chore: 格式化 GDScript 并忽略测试�
 git -C D:\games\RogueCoop log --oneline
 ```
 
-- [ ] **Step 6: 人工联机验收（需带上显示器，非 headless）**
+- [x] **Step 6: 人工联机验收（需带上显示器，非 headless）**
 
 1. 起两个实例：
    ```powershell
@@ -1577,3 +1577,44 @@ Expected: 双方互见、移动同步、无卡死。
 **5. 下一步（不在本计划内）**
 - M2：主机权威战斗（敌人 AI、伤害裁决、掉落、兴趣范围裁剪快照）。
 - M3：合作肉鸽循环（共享经验池 + 每人独立选卡、倒地救援、Boss、结算）。
+
+---
+
+## 执行偏离记录（M1 实际执行）
+
+本计划在执行中发现并修正了若干会导致失败的问题，记录如下，供 M2 计划复用：
+
+1. **快照玩家 id：u16 → u32（重要）**
+   - 现象：客户端连上后能收到 2 名玩家的快照，却认不出自己（`self=false`）。
+   - 根因：Godot 4 的对端 `multiplayer.get_unique_id()` 是**随机大整数**（实测 331138140 / 1420896317 等），计划的 `u16` 字段把 `1420896317` 截断成 `10301`。
+   - 修正：`net/protocol.gd` 中 `PLAYER_BYTES` 10 → 12，快照布局改为 `u32 tick | u8 count | N*(u32 id | f32 x | f32 y)`，即 `5 + N*12`；`encode_snapshot` 用 `encode_u32`，`decode_snapshot` 用 `decode_u32`。用例改用大 id（`1420896317`）防回归。
+   - 教训：**任何承载对端 id 的字段必须 u32**，M2 若传输 player_id / target_id / owner_id 一律 u32（或直接用变长编码）。
+
+2. **主机本地输入采样位置：表现层 → Net 层（重要）**
+   - 现象：人工验收时**主机侧 WASD 无效**，客户端正常。
+   - 根因：计划的 `scripts/player.gd` 只在「`is_local and Net.is_client()`」分支读输入并调 `Net.send_local_input`；主机本地玩家落到 `else: position = _auth`，主机侧**从无任何代码采样键盘**，`_host.local_move` 恒为 `Vector2.ZERO`。且 headless 测试场景里没有玩家节点，该 bug 自动化测不到。
+   - 修正：把主机本地输入采样上移到 `autoload/net.gd` 的 HOST 分支（`physics_step` 之前读 `Input.get_vector(...)` + 按键），新增 `_read_local_move()` / `_read_buttons()` 私有方法。`player.gd` 主机路径保持 `position = _auth` 不变。
+   - 回归锁定：`tools/net_test/net_test_host.gd` 增加 `Input.action_press("move_right")` 与 `host_moved` 断言（旧代码在此断言下必然失败）。
+   - 教训：**输入采样放在 Net 层**，保证“无场景树玩家节点”的 headless 测试也能覆盖。
+
+3. **客户端连接前不发送输入**
+   - `autoload/net.gd` 的客户端分支加 `local_id != 0` 守卫，消除连接建立前 `RPC via not connected` 报错。
+
+4. **`run_net_test.ps1` 两处坑**
+   - `$host` 是 PowerShell 保留只读变量，赋值报 `VariableNotWritable`；改名 `$hostProc`。
+   - `Start-Process -PassThru` 在重定向 stdout/stderr 场景下 `.ExitCode` 为空；改为按日志中的 `PASS` 标记判定（`Select-String -SimpleMatch -Quiet`）。
+
+5. **`net_test_host` 判定健壮性**
+   - 主机通过后立即 `quit()` 会切断客户端快照供给；改为「最少存活 3s」再 PASS。
+   - `_saw_two` 改为粘性闩锁（客户端先退出后不再被清零），否则主机误判 timeout。
+
+6. **单元测试计数勘误**
+   - 计划 Task 2 写 `[ProtocolInput] passed=8`、Task 4 写 `[Movement] passed=6`；实际断言数为 7 / 5。以实际为准，测试全绿即可。
+
+7. **`.gitignore` 备注**
+   - 实际测试日志写入 `%TEMP%\roguecoop_nettest\`，而非 `tools/net_test/*.log`；现有忽略条目无害但指向不存在路径，可择机清理。
+
+**自动化验收结果（M1 完成依据）**
+- 单元测试：`[UnitTests] ALL PASS`（ProtocolInput 7 / ProtocolSnapshot 9 / Movement 5 / Interp 6）。
+- 联机冒烟：`[NetTest] ALL PASS`（主机 `remote_input=1 two_players=1 client_moved=1 host_moved=1`；客户端 `connected snapshots=10 two_players=1 moved=1`）。
+- `gdformat` 无改动、`gdlint` no problems found。
