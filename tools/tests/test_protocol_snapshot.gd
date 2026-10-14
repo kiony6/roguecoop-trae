@@ -10,19 +10,19 @@ func run() -> int:
 
 	var players: Array = [
 		{"id": 1, "pos": Vector2(10.5, -20.25)},
-		{"id": 3, "pos": Vector2(0.0, 0.0)},
+		{"id": 1420896317, "pos": Vector2(0.0, 0.0)},
 	]
 
 	var bytes := Protocol.encode_snapshot(42, players)
-	t.eq(bytes.size(), Protocol.snapshot_size(2), "快照长度 = 5 + 2*10")
-	t.eq(bytes.size(), 25, "快照长度硬校验 = 25")
+	t.eq(bytes.size(), Protocol.snapshot_size(2), "快照长度 = 5 + 2*12")
+	t.eq(bytes.size(), 29, "快照长度硬校验 = 29")
 
 	var d := Protocol.decode_snapshot(bytes)
 	t.eq(d["tick"], 42, "tick 往返")
 	t.eq(d["players"].size(), 2, "玩家数往返")
 	t.eq(d["players"][0]["id"], 1, "id[0] 往返")
 	t.check((d["players"][0]["pos"] - Vector2(10.5, -20.25)).length() < 0.001, "pos[0] 往返")
-	t.eq(d["players"][1]["id"], 3, "id[1] 往返")
+	t.eq(d["players"][1]["id"], 1420896317, "大 id[1] 往返（u32 不截断）")
 
 	var empty := Protocol.decode_snapshot(Protocol.encode_snapshot(7, []))
 	t.eq(empty["players"].size(), 0, "空快照玩家数 = 0")

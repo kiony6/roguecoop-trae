@@ -130,7 +130,7 @@ func _physics_process(delta: float) -> void:
 		if _snap_accum >= 1.0 / float(Protocol.SNAPSHOT_RATE):
 			_snap_accum = 0.0
 			_send_snapshot()
-	elif mode == Mode.CLIENT:
+	elif mode == Mode.CLIENT and local_id != 0:
 		_send_accum += delta
 		if _send_accum >= 1.0 / float(Protocol.INPUT_RATE):
 			_send_accum = 0.0

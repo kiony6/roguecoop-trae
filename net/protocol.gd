@@ -1,6 +1,6 @@
 extends RefCounted
 ## 网络协议常量与二进制编解码（M1）。全部静态方法，无实例状态。
-## 输入帧：5 字节。快照：5 + N*10 字节。
+## 输入帧：5 字节。快照：5 + N*12 字节。
 
 const PROTOCOL_VERSION := 1
 const DEFAULT_PORT := 25600
@@ -11,7 +11,7 @@ const CH_CONTROL := 0         # 可靠通道
 const CH_DATA := 1            # 不可靠有序通道
 
 const INPUT_BYTES := 5
-const PLAYER_BYTES := 10
+const PLAYER_BYTES := 12
 
 
 # ---------------- 输入帧 ----------------
@@ -38,7 +38,8 @@ static func decode_input(b: PackedByteArray) -> Dictionary:
 
 
 # ---------------- 快照 ----------------
-# 布局: u32 tick | u8 count | count * (u16 id | f32 x | f32 y)
+# 布局: u32 tick | u8 count | count * (u32 id | f32 x | f32 y)
+# 注意：Godot 4 的对端 unique_id 为随机大整数（可达 2^31），必须用 u32 承载。
 
 static func encode_snapshot(tick: int, players: Array) -> PackedByteArray:
 	var b := PackedByteArray()
@@ -47,9 +48,9 @@ static func encode_snapshot(tick: int, players: Array) -> PackedByteArray:
 	b[4] = players.size()
 	var o := 5
 	for p in players:
-		b.encode_u16(o, int(p["id"]))
-		b.encode_float(o + 2, float(p["pos"].x))
-		b.encode_float(o + 6, float(p["pos"].y))
+		b.encode_u32(o, int(p["id"]))
+		b.encode_float(o + 4, float(p["pos"].x))
+		b.encode_float(o + 8, float(p["pos"].y))
 		o += PLAYER_BYTES
 	return b
 
@@ -63,8 +64,8 @@ static func decode_snapshot(b: PackedByteArray) -> Dictionary:
 		if o + PLAYER_BYTES > b.size():
 			break
 		out.append({
-			"id": b.decode_u16(o),
-			"pos": Vector2(b.decode_float(o + 2), b.decode_float(o + 6)),
+			"id": b.decode_u32(o),
+			"pos": Vector2(b.decode_float(o + 4), b.decode_float(o + 8)),
 		})
 		o += PLAYER_BYTES
 	return {"tick": b.decode_u32(0), "players": out}
