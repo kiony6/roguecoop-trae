@@ -1,10 +1,11 @@
 extends Node2D
-## 敌人表现节点。客户端按到达时间插值，主机直连权威位置。
+## 敌人表现节点。客户端按到达时间插值，主机直连权威位置。M3：Boss 差异化绘制。
 
 const Interp := preload("res://net/interp.gd")
 const Combat := preload("res://sim/combat.gd")
 
 var enemy_id := 0
+var kind := Combat.ENEMY_KIND_NORMAL
 
 var _interp := Interp.new()
 var _auth := Vector2.ZERO
@@ -18,13 +19,14 @@ func setup(id: int) -> void:
 	queue_redraw()
 
 
-func push_authoritative(pos: Vector2, hp: int) -> void:
+func push_authoritative(pos: Vector2, hp: int, kind_in: int) -> void:
 	if not _has_auth:
 		_has_auth = true
 		_auth = pos
 		position = pos
 	_auth = pos
 	_hp = hp
+	kind = kind_in
 	_interp.push(pos, float(Time.get_ticks_msec()))
 	queue_redraw()
 
@@ -39,10 +41,15 @@ func _physics_process(_delta: float) -> void:
 
 
 func _draw() -> void:
-	var t := clampf(1.0 - float(_hp) / float(Combat.ENEMY_MAX_HP), 0.0, 1.0)
-	var col := Color("b23b3b").lerp(Color("ff8080"), t)
-	draw_circle(Vector2.ZERO, Combat.ENEMY_RADIUS, col)
-	draw_arc(Vector2.ZERO, Combat.ENEMY_RADIUS, 0.0, TAU, 20, col.darkened(0.4), 2.0)
-	# 血条
-	draw_rect(Rect2(-12.0, -Combat.ENEMY_RADIUS - 9.0, 24.0, 3.0), Color(0, 0, 0, 0.5))
-	draw_rect(Rect2(-12.0, -Combat.ENEMY_RADIUS - 9.0, 24.0 * t, 3.0), Color("ffd93d"))
+	var max_hp := Combat.enemy_max_hp(kind)
+	var radius := Combat.enemy_radius(kind)
+	var t := clampf(1.0 - float(_hp) / float(max_hp), 0.0, 1.0)
+	var base := Color("6a3bb2") if kind == Combat.ENEMY_KIND_BOSS else Color("b23b3b")
+	var col := base.lerp(Color("ff8080"), t)
+	draw_circle(Vector2.ZERO, radius, col)
+	draw_arc(Vector2.ZERO, radius, 0.0, TAU, 24, col.darkened(0.4), 2.0)
+	if kind == Combat.ENEMY_KIND_BOSS:
+		draw_arc(Vector2.ZERO, radius + 5.0, 0.0, TAU, 32, Color("e0b0ff"), 2.0)
+	var w := radius * 1.7
+	draw_rect(Rect2(-w * 0.5, -radius - 9.0, w, 3.0), Color(0, 0, 0, 0.5))
+	draw_rect(Rect2(-w * 0.5, -radius - 9.0, w * t, 3.0), Color("ffd93d"))
