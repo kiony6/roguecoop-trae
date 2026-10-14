@@ -23,4 +23,13 @@ func run() -> int:
 	t.check(Combat.circle_hit(Vector2.ZERO, 10.0, Vector2(15, 0), 5.0), "相切（距离=半径和）判为命中")
 	t.check(not Combat.circle_hit(Vector2.ZERO, 10.0, Vector2(16, 0), 5.0), "略微分离判为不命中")
 
+	# —— M3：按 kind 派生敌人属性 + 掉落经验值 ——
+	t.eq(Combat.enemy_max_hp(Combat.ENEMY_KIND_NORMAL), 30, "普通怪最大血量 30")
+	t.eq(Combat.enemy_max_hp(Combat.ENEMY_KIND_BOSS), 200, "Boss 最大血量 200")
+	t.eq(Combat.enemy_radius(Combat.ENEMY_KIND_BOSS), 28.0, "Boss 半径 28")
+	t.eq(Combat.enemy_speed(Combat.ENEMY_KIND_BOSS), 70.0, "Boss 速度 70")
+	t.eq(Combat.enemy_touch_damage(Combat.ENEMY_KIND_BOSS), 20, "Boss 接触伤害 20")
+	t.eq(Combat.loot_xp(Combat.LOOT_KIND_XP), 5, "普通碎片经验 5")
+	t.eq(Combat.loot_xp(Combat.LOOT_KIND_BIG), 25, "Boss 大碎片经验 25")
+
 	return t.report("Combat")
