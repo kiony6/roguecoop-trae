@@ -21,4 +21,7 @@ func run() -> int:
 	var half := Movement.step(Vector2.ZERO, Vector2(0.5, 0), 1.0)
 	t.check(absf(half.x - Movement.SPEED * 0.5) < 0.001, "半速输入不被放大")
 
+	var fast := Movement.step(Vector2.ZERO, Vector2.RIGHT, 1.0, 100.0)
+	t.check(absf(fast.x - 100.0) < 0.001, "显式 speed 覆盖默认速度")
+
 	return t.report("Movement")

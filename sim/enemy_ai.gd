@@ -8,5 +8,5 @@ static func chase_dir(pos: Vector2, targets: Array) -> Vector2:
 	return Combat.aim_dir(pos, targets)
 
 
-static func step(pos: Vector2, dir: Vector2, delta: float) -> Vector2:
-	return pos + dir * Combat.ENEMY_SPEED * delta
+static func step(pos: Vector2, dir: Vector2, delta: float, speed: float = Combat.ENEMY_SPEED) -> Vector2:
+	return pos + dir * speed * delta

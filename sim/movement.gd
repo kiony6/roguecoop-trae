@@ -4,9 +4,9 @@ extends RefCounted
 const SPEED := 220.0
 
 
-static func step(pos: Vector2, move: Vector2, delta: float) -> Vector2:
+static func step(pos: Vector2, move: Vector2, delta: float, speed: float = SPEED) -> Vector2:
 	var dir := move
 	var len := dir.length()
 	if len > 1.0:
 		dir = dir / len
-	return pos + dir * SPEED * delta
+	return pos + dir * speed * delta

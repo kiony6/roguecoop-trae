@@ -23,4 +23,8 @@ func run() -> int:
 	var stay := EnemyAI.step(Vector2(5, 5), Vector2.ZERO, 1.0)
 	t.eq(stay, Vector2(5, 5), "零方向原地不动")
 
+	var slow := EnemyAI.step(Vector2.ZERO, Vector2.RIGHT, 1.0, 50.0)
+	t.check(absf(slow.x - 50.0) < 0.001, "显式 speed 覆盖默认速度（x）")
+	t.check(absf(slow.y) < 0.001, "显式 speed 覆盖默认速度（y 不变）")
+
 	return t.report("EnemyAI")
