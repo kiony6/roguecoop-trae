@@ -19,6 +19,7 @@ var _seen_loot := {}
 var _loot_seen := false
 var _loot_picked := false
 var _level_seen := false
+var _level_seen_at := 0.0
 var _status_seen := false
 
 
@@ -43,6 +44,8 @@ func _on_state(_tick: int, meta: Dictionary, players: Array, enemies: Array, loo
 	if players.size() >= 2:
 		_saw_two = true
 	if int(meta.get("level", 1)) >= 2:
+		if not _level_seen:
+			_level_seen_at = _t
 		_level_seen = true
 	for p in players:
 		if p.has("status"):
@@ -85,13 +88,15 @@ func _process(delta: float) -> void:
 	_t += delta
 	# 最少存活 4s，保证客户端有足够时间收满快照并观察到位移/战斗/升级
 	var combat_ok := _enemy_seen and _enemy_killed and _loot_seen
+	# 等级达标后再停留 0.6s，确保客户端至少收到一份包含 level>=2 的快照后才退出
+	var linger_ok := _level_seen and (_t - _level_seen_at) > 0.6
 	if (
 		_remote_input
 		and _saw_two
 		and _client_moved
 		and _host_moved
 		and combat_ok
-		and _level_seen
+		and linger_ok
 		and _status_seen
 		and _t > 4.0
 	):

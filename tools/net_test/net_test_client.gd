@@ -17,6 +17,16 @@ var _level_seen := false
 var _status_seen := false
 var _ip := "127.0.0.1"
 
+# 场景说明：玩家速度(220)远快于敌人(90)，若持续开火会在弹道射程外击杀敌人，
+# 掉落物落在行进线外、超出磁吸半径(90)，永不拾取 → 经验恒 0、无法升级。
+# 故先右移满足位移断言，随后原地等待，仅在敌人贴近(<=FIRE_NEAR)时开火，
+# 使敌人在近身被击杀、掉落落入磁吸范围而被拾取，触发共享经验池升级。
+const MOVE_BEFORE := 1.5
+const FIRE_NEAR := 70.0
+var _self_pos := Vector2.ZERO
+var _have_self := false
+var _nearest_enemy := INF
+
 
 func _ready() -> void:
 	for a in OS.get_cmdline_user_args():
@@ -34,8 +44,12 @@ func _ready() -> void:
 
 
 func _physics_process(_delta: float) -> void:
-	# 持续向右移动 + 开火
-	Net.send_local_input(Vector2.RIGHT, 1)
+	# 前段右移（满足位移断言）；之后原地等待，仅在敌人贴近时开火，迫使近身击杀→拾取
+	if _t < MOVE_BEFORE:
+		Net.send_local_input(Vector2.RIGHT, 1)
+	else:
+		var btn := 1 if _nearest_enemy <= FIRE_NEAR else 0
+		Net.send_local_input(Vector2.ZERO, btn)
 
 
 func _on_connected(local_id: int) -> void:
@@ -60,6 +74,8 @@ func _on_state(_tick: int, meta: Dictionary, players: Array, enemies: Array, loo
 		if p["id"] != Net.local_id:
 			continue
 		_self_seen = true
+		_self_pos = p["pos"]
+		_have_self = true
 		if not _self_start_captured:
 			_self_start = p["pos"]
 			_self_start_captured = true
@@ -69,6 +85,11 @@ func _on_state(_tick: int, meta: Dictionary, players: Array, enemies: Array, loo
 		_enemy_seen = true
 	if not loot.is_empty():
 		_loot_seen = true
+	# 供开火门控使用：到最近敌人的距离
+	_nearest_enemy = INF
+	if _have_self:
+		for e in enemies:
+			_nearest_enemy = minf(_nearest_enemy, _self_pos.distance_to(e["pos"]))
 
 
 func _process(delta: float) -> void:
