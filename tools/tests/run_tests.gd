@@ -6,6 +6,10 @@ const SUITES: Array = [
 	preload("res://tools/tests/test_protocol_snapshot.gd"),
 	preload("res://tools/tests/test_movement.gd"),
 	preload("res://tools/tests/test_interp.gd"),
+	preload("res://tools/tests/test_combat.gd"),
+	preload("res://tools/tests/test_enemy_ai.gd"),
+	preload("res://tools/tests/test_aoi.gd"),
+	preload("res://tools/tests/test_net_host_combat.gd"),
 ]
 
 

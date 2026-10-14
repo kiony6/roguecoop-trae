@@ -22,8 +22,8 @@ $client = Start-Process -FilePath $godot -PassThru -NoNewWindow `
     -ArgumentList @("--headless", "--path", $proj, "res://tools/net_test/net_test_client.tscn") `
     -RedirectStandardOutput $cliOut -RedirectStandardError $cliErr
 
-$client.WaitForExit(30000) | Out-Null
-$hostProc.WaitForExit(30000) | Out-Null
+$client.WaitForExit(40000) | Out-Null
+$hostProc.WaitForExit(40000) | Out-Null
 
 if (Test-Path $hostOut) { Write-Host "--- host.log ---"; Get-Content $hostOut | ForEach-Object { Write-Host $_ } }
 if (Test-Path $cliOut)  { Write-Host "--- client.log ---"; Get-Content $cliOut | ForEach-Object { Write-Host $_ } }

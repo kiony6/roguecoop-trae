@@ -5,6 +5,7 @@ extends Node2D
 
 const Interp := preload("res://net/interp.gd")
 const Movement := preload("res://sim/movement.gd")
+const Combat := preload("res://sim/combat.gd")
 
 const CORRECT_RATE := 10.0  # 软校正速率
 const SNAP_DIST := 140.0  # 误差超过该距离直接硬吸附
@@ -13,6 +14,7 @@ const RADIUS := 14.0
 var player_id := 0
 var is_local := false
 var color := Color.WHITE
+var hp := Combat.PLAYER_MAX_HP
 
 var _interp := Interp.new()
 var _auth := Vector2.ZERO
@@ -29,14 +31,16 @@ func setup(id: int, local: bool, c: Color) -> void:
 	queue_redraw()
 
 
-func push_authoritative(pos: Vector2) -> void:
+func push_authoritative(pos: Vector2, hp_in: int) -> void:
 	if not _has_auth:
 		_has_auth = true
 		_auth = pos
 		_predicted = pos
 		position = pos
 	_auth = pos
+	hp = hp_in
 	_interp.push(pos, float(Time.get_ticks_msec()))
+	queue_redraw()
 
 
 func _physics_process(delta: float) -> void:
@@ -77,3 +81,6 @@ func _draw() -> void:
 	draw_arc(Vector2.ZERO, RADIUS, 0.0, TAU, 24, color.darkened(0.35), 2.0)
 	if is_local:
 		draw_arc(Vector2.ZERO, RADIUS + 4.0, 0.0, TAU, 24, color.lightened(0.4), 1.0)
+	var ratio := clampf(float(hp) / float(Combat.PLAYER_MAX_HP), 0.0, 1.0)
+	draw_rect(Rect2(-14.0, -RADIUS - 9.0, 28.0, 3.0), Color(0, 0, 0, 0.5))
+	draw_rect(Rect2(-14.0, -RADIUS - 9.0, 28.0 * ratio, 3.0), Color("7be07b"))

@@ -1,5 +1,5 @@
 extends Node
-## M1 联机冒烟测试 —— 主机端。由 run_net_test.ps1 与客户端实例并行启动。
+## M2 联机冒烟测试 —— 主机端。由 run_net_test.ps1 与客户端实例并行启动。
 
 const Protocol := preload("res://net/protocol.gd")
 
@@ -12,11 +12,18 @@ var _client_moved := false
 var _host_start_captured := false
 var _host_start := Vector2.ZERO
 var _host_moved := false
+var _seen_enemies := {}
+var _enemy_seen := false
+var _enemy_killed := false
+var _seen_loot := {}
+var _loot_seen := false
+var _loot_picked := false
 
 
 func _ready() -> void:
-	# 模拟主机本地按键：验证主机侧输入真的被采样（曾出现主机 WASD 无效的回归）
+	# 模拟主机本地按键：移动 + 开火，验证主机侧输入真的被采样（曾出现主机 WASD 无效的回归）
 	Input.action_press("move_right")
+	Input.action_press("fire")
 	Net.input_received.connect(_on_input)
 	Net.world_state.connect(_on_state)
 	var err := Net.host_start(Protocol.DEFAULT_PORT)
@@ -30,7 +37,7 @@ func _on_input(pid: int) -> void:
 		_remote_input = true
 
 
-func _on_state(_tick: int, players: Array) -> void:
+func _on_state(_tick: int, players: Array, enemies: Array, loot: Array) -> void:
 	if players.size() >= 2:
 		_saw_two = true
 	for p in players:
@@ -47,18 +54,58 @@ func _on_state(_tick: int, players: Array) -> void:
 		elif p["pos"].x - _client_start.x > 30.0:
 			_client_moved = true
 
+	var enemy_now := {}
+	for e in enemies:
+		enemy_now[e["id"]] = true
+		_seen_enemies[e["id"]] = true
+	if not enemy_now.is_empty():
+		_enemy_seen = true
+	for id in _seen_enemies.keys():
+		if not enemy_now.has(id):
+			_enemy_killed = true
+
+	var loot_now := {}
+	for l in loot:
+		loot_now[l["id"]] = true
+		_seen_loot[l["id"]] = true
+	if not loot_now.is_empty():
+		_loot_seen = true
+	for id in _seen_loot.keys():
+		if not loot_now.has(id):
+			_loot_picked = true
+
 
 func _process(delta: float) -> void:
 	_t += delta
-	# 最少存活 3s，保证客户端有足够时间收满 ≥10 个快照并观察到位移
-	if _remote_input and _saw_two and _client_moved and _host_moved and _t > 3.0:
-		print("[NetTest-Host] PASS remote_input=1 two_players=1 client_moved=1 host_moved=1")
+	# 最少存活 4s，保证客户端有足够时间收满快照并观察到位移/战斗
+	var combat_ok := _enemy_seen and _enemy_killed and _loot_seen
+	if _remote_input and _saw_two and _client_moved and _host_moved and combat_ok and _t > 4.0:
+		print(
+			(
+				(
+					"[NetTest-Host] PASS remote_input=1 two_players=1 client_moved=1 host_moved=1 "
+					+ "enemy_seen=1 enemy_killed=1 loot_seen=1 loot_picked=%d"
+				)
+				% (1 if _loot_picked else 0)
+			)
+		)
 		get_tree().quit(0)
-	elif _t > 20.0:
+	elif _t > 25.0:
 		printerr(
 			(
-				"[NetTest-Host] FAIL timeout remote_input=%s two_players=%s moved=%s host_moved=%s"
-				% [_remote_input, _saw_two, _client_moved, _host_moved]
+				(
+					"[NetTest-Host] FAIL timeout remote_input=%s two=%s cmoved=%s hmoved=%s "
+					+ "eseen=%s ekilled=%s lseen=%s"
+				)
+				% [
+					_remote_input,
+					_saw_two,
+					_client_moved,
+					_host_moved,
+					_enemy_seen,
+					_enemy_killed,
+					_loot_seen,
+				]
 			)
 		)
 		get_tree().quit(1)

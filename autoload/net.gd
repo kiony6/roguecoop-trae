@@ -6,7 +6,7 @@ extends Node
 signal player_joined(player_id: int)
 signal player_left(player_id: int)
 signal input_received(player_id: int)
-signal world_state(tick: int, players: Array)
+signal world_state(tick: int, players: Array, enemies: Array, loot: Array)
 signal connected_ok(local_id: int)
 signal connection_failed
 signal disconnected
@@ -16,6 +16,7 @@ enum Mode { NONE, HOST, CLIENT }
 const Protocol := preload("res://net/protocol.gd")
 const NetHostLogic := preload("res://net/net_host.gd")
 const NetClientLogic := preload("res://net/net_client.gd")
+const AoI := preload("res://net/aoi.gd")
 
 var mode: Mode = Mode.NONE
 var local_id := 0
@@ -144,12 +145,14 @@ func _physics_process(delta: float) -> void:
 		_host.local_move = _read_local_move()
 		_host.local_buttons = _read_buttons()
 		_host.physics_step(delta)
-		# 本机渲染每物理帧刷新（60Hz），网络快照另行降频
-		world_state.emit(_host.tick, _host.player_states())
+		# 本机渲染每物理帧刷新（60Hz），直连完整权威状态
+		world_state.emit(
+			_host.tick, _host.player_states(), _host.enemy_states(), _host.loot_states()
+		)
 		_snap_accum += delta
 		if _snap_accum >= 1.0 / float(Protocol.SNAPSHOT_RATE):
 			_snap_accum = 0.0
-			_send_snapshot()
+			_send_snapshots()
 	elif mode == Mode.CLIENT and local_id != 0:
 		_send_accum += delta
 		if _send_accum >= 1.0 / float(Protocol.INPUT_RATE):
@@ -162,10 +165,21 @@ func _physics_process(delta: float) -> void:
 			)
 
 
-func _send_snapshot() -> void:
-	var payload := Protocol.encode_snapshot(_host.tick, _host.player_states())
+func _send_snapshots() -> void:
+	var players := _host.player_states()
+	var enemies := _host.enemy_states()
+	var loot := _host.loot_states()
+	for peer in _host.peer_ids():
+		if peer == 1:
+			continue  # 主机本地走 world_state 直连
+		if not _host.players.has(peer):
+			continue
+		var center: Vector2 = _host.players[peer]["pos"]
+		var culled_enemies := AoI.cull(center, AoI.AOI_RADIUS, enemies)
+		var culled_loot := AoI.cull(center, AoI.AOI_RADIUS, loot)
+		var payload := Protocol.encode_snapshot(_host.tick, players, culled_enemies, culled_loot)
+		_rpc_snapshot.rpc_id(peer, _host.tick, payload)
 	_host.snapshot_count += 1
-	_rpc_snapshot.rpc(_host.tick, payload)
 
 
 # ---------------- 连接事件 ----------------
@@ -233,7 +247,7 @@ func _rpc_snapshot(_tick_in: int, payload: PackedByteArray) -> void:
 	var snap := Protocol.decode_snapshot(payload)
 	_client.last_snapshot_tick = snap["tick"]
 	_client.last_players = snap["players"]
-	world_state.emit(snap["tick"], snap["players"])
+	world_state.emit(snap["tick"], snap["players"], snap["enemies"], snap["loot"])
 
 
 @rpc("authority", "call_remote", "reliable", 0)
