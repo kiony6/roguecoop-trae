@@ -1,5 +1,5 @@
 extends Node
-## M2 联机冒烟测试 —— 主机端。由 run_net_test.ps1 与客户端实例并行启动。
+## M3 联机冒烟测试 —— 主机端。由 run_net_test.ps1 与客户端实例并行启动。
 
 const Protocol := preload("res://net/protocol.gd")
 
@@ -18,6 +18,8 @@ var _enemy_killed := false
 var _seen_loot := {}
 var _loot_seen := false
 var _loot_picked := false
+var _level_seen := false
+var _status_seen := false
 
 
 func _ready() -> void:
@@ -37,10 +39,14 @@ func _on_input(pid: int) -> void:
 		_remote_input = true
 
 
-func _on_state(_tick: int, players: Array, enemies: Array, loot: Array) -> void:
+func _on_state(_tick: int, meta: Dictionary, players: Array, enemies: Array, loot: Array) -> void:
 	if players.size() >= 2:
 		_saw_two = true
+	if int(meta.get("level", 1)) >= 2:
+		_level_seen = true
 	for p in players:
+		if p.has("status"):
+			_status_seen = true
 		if p["id"] == 1:
 			if not _host_start_captured:
 				_host_start = p["pos"]
@@ -77,14 +83,23 @@ func _on_state(_tick: int, players: Array, enemies: Array, loot: Array) -> void:
 
 func _process(delta: float) -> void:
 	_t += delta
-	# 最少存活 4s，保证客户端有足够时间收满快照并观察到位移/战斗
+	# 最少存活 4s，保证客户端有足够时间收满快照并观察到位移/战斗/升级
 	var combat_ok := _enemy_seen and _enemy_killed and _loot_seen
-	if _remote_input and _saw_two and _client_moved and _host_moved and combat_ok and _t > 4.0:
+	if (
+		_remote_input
+		and _saw_two
+		and _client_moved
+		and _host_moved
+		and combat_ok
+		and _level_seen
+		and _status_seen
+		and _t > 4.0
+	):
 		print(
 			(
 				(
 					"[NetTest-Host] PASS remote_input=1 two_players=1 client_moved=1 host_moved=1 "
-					+ "enemy_seen=1 enemy_killed=1 loot_seen=1 loot_picked=%d"
+					+ "enemy_seen=1 enemy_killed=1 loot_seen=1 loot_picked=%d level_seen=1 status_seen=1"
 				)
 				% (1 if _loot_picked else 0)
 			)
@@ -95,7 +110,7 @@ func _process(delta: float) -> void:
 			(
 				(
 					"[NetTest-Host] FAIL timeout remote_input=%s two=%s cmoved=%s hmoved=%s "
-					+ "eseen=%s ekilled=%s lseen=%s"
+					+ "eseen=%s ekilled=%s lseen=%s level=%s status=%s"
 				)
 				% [
 					_remote_input,
@@ -105,6 +120,8 @@ func _process(delta: float) -> void:
 					_enemy_seen,
 					_enemy_killed,
 					_loot_seen,
+					_level_seen,
+					_status_seen,
 				]
 			)
 		)

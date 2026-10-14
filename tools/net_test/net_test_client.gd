@@ -1,5 +1,5 @@
 extends Node
-## M2 联机冒烟测试 —— 客户端端。由 run_net_test.ps1 与主机实例并行启动。
+## M3 联机冒烟测试 —— 客户端。由 run_net_test.ps1 与主机实例并行启动。
 
 const Protocol := preload("res://net/protocol.gd")
 
@@ -13,6 +13,8 @@ var _self_start := Vector2.ZERO
 var _self_moved := false
 var _enemy_seen := false
 var _loot_seen := false
+var _level_seen := false
+var _status_seen := false
 var _ip := "127.0.0.1"
 
 
@@ -46,11 +48,15 @@ func _on_failed() -> void:
 	get_tree().quit(1)
 
 
-func _on_state(_tick: int, players: Array, enemies: Array, loot: Array) -> void:
+func _on_state(_tick: int, meta: Dictionary, players: Array, enemies: Array, loot: Array) -> void:
 	_snapshots += 1
 	if players.size() >= 2:
 		_saw_two = true
+	if int(meta.get("level", 1)) >= 2:
+		_level_seen = true
 	for p in players:
+		if p.has("status"):
+			_status_seen = true
 		if p["id"] != Net.local_id:
 			continue
 		_self_seen = true
@@ -75,12 +81,14 @@ func _process(delta: float) -> void:
 		and _self_moved
 		and _enemy_seen
 		and _loot_seen
+		and _level_seen
+		and _status_seen
 	):
 		print(
 			(
 				(
 					"[NetTest-Client] PASS local_id=%d snapshots=%d two_players=1 moved=1 "
-					+ "enemy_seen=1 loot_seen=1"
+					+ "enemy_seen=1 loot_seen=1 level_seen=1 status_seen=1"
 				)
 				% [Net.local_id, _snapshots]
 			)
@@ -91,7 +99,7 @@ func _process(delta: float) -> void:
 			(
 				(
 					"[NetTest-Client] FAIL timeout connected=%s snapshots=%d two=%s self=%s "
-					+ "moved=%s eseen=%s lseen=%s"
+					+ "moved=%s eseen=%s lseen=%s level=%s status=%s"
 				)
 				% [
 					_connected,
@@ -101,6 +109,8 @@ func _process(delta: float) -> void:
 					_self_moved,
 					_enemy_seen,
 					_loot_seen,
+					_level_seen,
+					_status_seen,
 				]
 			)
 		)
