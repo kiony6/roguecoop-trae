@@ -6,7 +6,10 @@ extends Node
 signal player_joined(player_id: int)
 signal player_left(player_id: int)
 signal input_received(player_id: int)
-signal world_state(tick: int, players: Array, enemies: Array, loot: Array)
+signal world_state(tick: int, meta: Dictionary, players: Array, enemies: Array, loot: Array)
+signal upgrade_offer(choices: PackedInt32Array)
+signal player_upgrade(player_id: int, card_id: int)
+signal run_over(won: bool, stats: Dictionary)
 signal connected_ok(local_id: int)
 signal connection_failed
 signal disconnected
@@ -26,6 +29,7 @@ var _client := NetClientLogic.new()
 var _send_accum := 0.0
 var _snap_accum := 0.0
 var _known_peers: Array = []
+var _run_over_sent := false
 
 
 func _ready() -> void:
@@ -59,6 +63,7 @@ func host_start(port: int) -> Error:
 	multiplayer.multiplayer_peer = peer
 	_host.reset()
 	_known_peers.clear()
+	_run_over_sent = false
 	mode = Mode.HOST
 	local_id = 1
 	_send_accum = 0.0
@@ -91,6 +96,7 @@ func client_connect(address: String, port: int) -> Error:
 	multiplayer.multiplayer_peer = peer
 	_client.reset()
 	_known_peers.clear()
+	_run_over_sent = false
 	mode = Mode.CLIENT
 	local_id = 0
 	_send_accum = 0.0
@@ -123,6 +129,14 @@ func send_local_input(move: Vector2, buttons: int) -> void:
 		_client.pending_buttons = buttons
 
 
+func send_upgrade_pick(card_id: int) -> void:
+	if mode == Mode.CLIENT:
+		_rpc_upgrade_pick.rpc_id(1, card_id)
+	elif mode == Mode.HOST:
+		if _host.apply_choice(1, card_id):
+			player_upgrade.emit(1, card_id)
+
+
 func _read_local_move() -> Vector2:
 	return Input.get_vector("move_left", "move_right", "move_up", "move_down")
 
@@ -144,11 +158,19 @@ func _physics_process(delta: float) -> void:
 		# 主机本地玩家的输入在这里采样：不依赖场景树中是否恰好存在玩家节点
 		_host.local_move = _read_local_move()
 		_host.local_buttons = _read_buttons()
-		_host.physics_step(delta)
+		if not _host.run_over:
+			_host.physics_step(delta)
 		# 本机渲染每物理帧刷新（60Hz），直连完整权威状态
 		world_state.emit(
-			_host.tick, _host.player_states(), _host.enemy_states(), _host.loot_states()
+			_host.tick,
+			_host.meta(),
+			_host.player_states(),
+			_host.enemy_states(),
+			_host.loot_states()
 		)
+		if not _host.run_over:
+			_offer_to_players()
+			_check_run_over()
 		_snap_accum += delta
 		if _snap_accum >= 1.0 / float(Protocol.SNAPSHOT_RATE):
 			_snap_accum = 0.0
@@ -165,7 +187,34 @@ func _physics_process(delta: float) -> void:
 			)
 
 
+func _offer_to_players() -> void:
+	for peer in _host.peer_ids():
+		var choices := _host.pending_offer(peer)
+		if choices.is_empty():
+			continue
+		var packed := PackedInt32Array(choices)
+		if peer == 1:
+			upgrade_offer.emit(packed)
+		else:
+			_rpc_upgrade_offer.rpc_id(peer, packed)
+
+
+func _check_run_over() -> void:
+	if _host.run_over and not _run_over_sent:
+		_run_over_sent = true
+		var stats := _host.stats()
+		run_over.emit(_host.won, stats)
+		_rpc_run_over.rpc(
+			_host.won,
+			int(stats["kills"]),
+			int(stats["level"]),
+			int(stats["boss_kills"]),
+			float(stats["seconds"])
+		)
+
+
 func _send_snapshots() -> void:
+	var meta := _host.meta()
 	var players := _host.player_states()
 	var enemies := _host.enemy_states()
 	var loot := _host.loot_states()
@@ -177,7 +226,7 @@ func _send_snapshots() -> void:
 		var center: Vector2 = _host.players[peer]["pos"]
 		var culled_enemies := AoI.cull(center, AoI.AOI_RADIUS, enemies)
 		var culled_loot := AoI.cull(center, AoI.AOI_RADIUS, loot)
-		var payload := Protocol.encode_snapshot(_host.tick, players, culled_enemies, culled_loot)
+		var payload := Protocol.encode_snapshot(_host.tick, meta, players, culled_enemies, culled_loot)
 		_rpc_snapshot.rpc_id(peer, _host.tick, payload)
 	_host.snapshot_count += 1
 
@@ -226,6 +275,7 @@ func _broadcast_peer_list() -> void:
 
 # ---------------- RPC ----------------
 
+
 @rpc("any_peer", "call_remote", "unreliable_ordered", 1)
 func _rpc_input(_tick_in: int, payload: PackedByteArray) -> void:
 	if mode != Mode.HOST:
@@ -246,8 +296,9 @@ func _rpc_snapshot(_tick_in: int, payload: PackedByteArray) -> void:
 		return
 	var snap := Protocol.decode_snapshot(payload)
 	_client.last_snapshot_tick = snap["tick"]
+	_client.last_meta = snap["meta"]
 	_client.last_players = snap["players"]
-	world_state.emit(snap["tick"], snap["players"], snap["enemies"], snap["loot"])
+	world_state.emit(snap["tick"], snap["meta"], snap["players"], snap["enemies"], snap["loot"])
 
 
 @rpc("authority", "call_remote", "reliable", 0)
@@ -265,3 +316,30 @@ func _rpc_peer_list(ids: PackedInt32Array) -> void:
 		if not ids.has(id):
 			_known_peers.erase(id)
 			player_left.emit(id)
+
+
+@rpc("authority", "call_remote", "reliable", 0)
+func _rpc_upgrade_offer(choices: PackedInt32Array) -> void:
+	if mode != Mode.CLIENT:
+		return
+	upgrade_offer.emit(choices)
+
+
+@rpc("any_peer", "call_remote", "reliable", 0)
+func _rpc_upgrade_pick(card_id: int) -> void:
+	if mode != Mode.HOST:
+		return
+	var sender := multiplayer.get_remote_sender_id()
+	if sender == 0 or sender == 1:
+		return
+	if _host.apply_choice(sender, card_id):
+		player_upgrade.emit(sender, card_id)
+
+
+@rpc("authority", "call_remote", "reliable", 0)
+func _rpc_run_over(won: bool, kills: int, level: int, boss_kills: int, seconds: float) -> void:
+	if mode != Mode.CLIENT:
+		return
+	run_over.emit(
+		won, {"kills": kills, "level": level, "boss_kills": boss_kills, "seconds": seconds}
+	)

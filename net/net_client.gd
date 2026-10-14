@@ -3,6 +3,7 @@ extends RefCounted
 
 var tick := 0
 var last_snapshot_tick := 0
+var last_meta: Dictionary = {}
 var last_players: Array = []
 var pending_move := Vector2.ZERO
 var pending_buttons := 0
@@ -11,6 +12,7 @@ var pending_buttons := 0
 func reset() -> void:
 	tick = 0
 	last_snapshot_tick = 0
+	last_meta = {}
 	last_players = []
 	pending_move = Vector2.ZERO
 	pending_buttons = 0
