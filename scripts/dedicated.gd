@@ -36,7 +36,11 @@ func _start() -> void:
 	print(
 		(
 			"[Dedicated] listening port=%d bind=%s transport=%s"
-			% [_port, "0.0.0.0" if _bind.is_empty() else _bind, "ws/tcp" if Net.transport_ws else "udp/enet"]
+			% [
+				_port,
+				"0.0.0.0" if _bind.is_empty() else _bind,
+				"ws/tcp" if Net.transport_ws else "udp/enet"
+			]
 		)
 	)
 

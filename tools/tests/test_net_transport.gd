@@ -8,7 +8,9 @@ func run() -> int:
 	var t := Harness.new()
 
 	# (1) WebSocket URL 构造：create_client 需要带 scheme 的完整地址
-	t.eq(Net.ws_url("play.simpfun.cn", 30470), "ws://play.simpfun.cn:30470", "ws_url 拼出带 scheme 的地址")
+	t.eq(
+		Net.ws_url("play.simpfun.cn", 30470), "ws://play.simpfun.cn:30470", "ws_url 拼出带 scheme 的地址"
+	)
 	t.eq(Net.ws_url("127.0.0.1", 25600), "ws://127.0.0.1:25600", "ws_url 支持回环地址")
 	t.eq(Net.ws_url("0.0.0.0", 65535), "ws://0.0.0.0:65535", "ws_url 支持端口上界 65535")
 
