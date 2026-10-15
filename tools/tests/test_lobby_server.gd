@@ -98,7 +98,7 @@ func run() -> int:
 	var logic_f = lobby_f.logic_of(code_f)
 	t.check(logic_f != null, "logic 非空")
 	t.check(logic_f.players.has(1) and logic_f.players.has(2), "logic 含全部成员")
-	t.check(logic_f.room_walls.size() > 0, "地图墙体非空")
+	t.check(logic_f.room_walls.is_empty(), "地图墙体已移除（恒为空）")
 	lobby_f.step(0.2)
 	t.check(logic_f.tick > 0, "step 后 tick 增长")
 	t.check(lobby_f.running_rooms().has(code_f), "running_rooms 含该房")
@@ -118,7 +118,7 @@ func run() -> int:
 	var logic_gb = lobby_g.logic_of(String(g2["code"]))
 	t.check(logic_ga != logic_gb, "两房 logic 实例不同")
 	t.check(logic_ga._rng.seed != logic_gb._rng.seed, "两房种子不同")
-	t.check(logic_ga.room_walls != logic_gb.room_walls, "两房墙体不同")
+	t.check(logic_ga.room_walls.is_empty() and logic_gb.room_walls.is_empty(), "两房墙体均为空")
 
 	# (11) 4 房并发隔离 + 单房 run_over 不串扰 + finish_run 只影响本房
 	var lobby_h := LobbyServer.new(acct)

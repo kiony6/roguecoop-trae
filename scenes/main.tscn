@@ -30,10 +30,6 @@ custom_minimum_size = Vector2(0, 56)
 theme_type_variation = &"PrimaryButton"
 text = "联机大厅"
 
-[node name="DirectButton" type="Button" parent="Center/Box"]
-custom_minimum_size = Vector2(0, 48)
-text = "局域网直连"
-
 [node name="Links" type="HBoxContainer" parent="Center/Box"]
 alignment = 1
 theme_override_constants/separation = 8

@@ -9,7 +9,8 @@ const LobbyLib := preload("res://net/lobby.gd")
 
 const BAD_CANDIDATES := ["999999", "888888", "777777"]
 const DEFAULT_TIMEOUT := 45.0
-const HOST_TIMEOUT := 140.0  # host 要跑完一整局（含等队友 + 结算 + 再来一局）
+const HOST_TIMEOUT := 200.0  # host 要跑完一整局（含等队友 + 结算 + 再来一局）
+# 每房地图种子随机 → 单局时长波动大；墙体移除后玩家不再被墙卡住、单局更易拖长，故预算留足
 const DEFAULT_LINGER := 30.0  # seat 默认留房时长
 const MEMBER_SETTLE := 2.5  # host 见到第 2 名队友后再等这么久，确保其余座位入房后才开局
 const WAIT_GRACE := 1.5  # 结算后等 room_state 回落 WAITING 的宽限
@@ -165,7 +166,7 @@ func _on_world_state(
 	_snaps += 1
 	if int(meta.get("wave", 0)) >= 1:
 		_wave_seen = true
-	if Net.room_walls().size() > 0:
+	if Net.room_walls().is_empty():
 		_walls_seen = true
 	_have_self = false
 	for p in players:

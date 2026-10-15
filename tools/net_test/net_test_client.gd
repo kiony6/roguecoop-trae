@@ -86,10 +86,10 @@ func _on_state(
 	# M5.3：取默认值 0 而非 1——v1 服务端根本不传 wave，v2 才成立，故这是真判别器
 	if int(meta.get("wave", 0)) >= 1:
 		_wave_seen = true
-	# M4：客户端收到含弹丸的快照，且已收到主机可靠下发的房间（_rpc_room）
+	# M4：客户端收到含弹丸的快照；墙体已移除，房间下发内容恒为空
 	if not projectiles.is_empty():
 		_proj_seen = true
-	if Net.room_walls().size() > 0:
+	if Net.room_walls().is_empty():
 		_room_ok = true
 	for p in players:
 		if p.has("status"):

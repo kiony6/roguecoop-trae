@@ -60,7 +60,8 @@ func _on_state(
 	# M4：波次档位已推进到 >=1、程序化房间墙体已生成、快照含弹丸
 	if int(meta.get("wave", 0)) >= 1:
 		_wave_ok = true
-	if Net.room_walls().size() > 0:
+	# 墙体已移除：房间下发内容恒为空，room_ok 改为确认为空
+	if Net.room_walls().is_empty():
 		_room_ok = true
 	if not projectiles.is_empty():
 		_proj_seen = true
