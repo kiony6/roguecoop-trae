@@ -24,9 +24,14 @@ var lobby_open := false  # 传输层已连上大厅
 var _password := ""  # 登录时暂存明文，等挑战回来后立即派生 verifier 并清空
 var _pending_user := ""
 var _closing := false
+var _lobby_host := LOBBY_HOST  # 可被 `--lobby=<host[:port]>` 覆盖（偏离 11）
+var _lobby_port := LOBBY_PORT
 
 
 func _ready() -> void:
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--lobby="):
+			_parse_lobby_override(a.substr(8))
 	Net.connected_ok.connect(_on_connected)
 	Net.connection_failed.connect(_on_connection_failed)
 	Net.disconnected.connect(_on_disconnected)
@@ -37,20 +42,36 @@ func _ready() -> void:
 	Net.version_mismatch.connect(_on_version_mismatch)
 
 
-func connect_lobby(address: String = LOBBY_HOST, port: int = LOBBY_PORT) -> void:
+func connect_lobby(address: String = "", port: int = 0) -> void:
 	## 连联机大厅：占 ROLE_LOBBY 角色，只走账号 RPC，不进对局。幂等（已连则直接返回）。
+	## address/port 留空时走 _lobby_host/_lobby_port（可被 `--lobby=` 覆盖，偏离 11）。
 	if Net.is_client():
 		return
 	if Net.is_host():
 		Net.host_stop()
 	lobby_open = false
 	_closing = false
+	var host := _lobby_host if address.is_empty() else address
+	var port_num := _lobby_port if port <= 0 else port
 	Net.set_websocket(true)
 	Net.set_role(Protocol.ROLE_LOBBY)
 	lobby_connecting.emit()
-	var err := Net.client_connect(address, port)
+	var err := Net.client_connect(host, port_num)
 	if err != OK:
 		lobby_failed.emit("无法发起连接（错误码 %d）" % err)
+
+
+func _parse_lobby_override(spec: String) -> void:
+	## 解析 `--lobby=<host[:port]>`（偏离 11）：只给 host 时沿用默认端口。
+	var s := spec.strip_edges()
+	if s.is_empty():
+		return
+	var i := s.rfind(":")
+	if i > 0 and s.substr(i + 1).is_valid_int():
+		_lobby_host = s.substr(0, i)
+		_lobby_port = s.substr(i + 1).to_int()
+	else:
+		_lobby_host = s
 
 
 func disconnect_lobby() -> void:

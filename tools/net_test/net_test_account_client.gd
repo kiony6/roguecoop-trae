@@ -8,8 +8,8 @@ const STAGE_TIMEOUT := 15.0
 const MISMATCH_LINGER := 0.5  # 版本不符时多留 0.5s 便于服务端日志取证
 
 var _stage := "register"
-var _ip := "127.0.0.1"
-var _port := Protocol.DEFAULT_PORT
+var _ip := ""  # 留空则交 Account 按 `--lobby=` 覆盖 / 默认大厅地址解析（偏离 11）
+var _port := 0
 var _user := ""
 var _password := ""
 var _t := 0.0
