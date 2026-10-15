@@ -30,6 +30,8 @@ func _ready() -> void:
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--latency="):
 			Net.set_debug_latency_ms(int(a.substr(10)))
+		elif a.begins_with("--transport="):
+			Net.set_websocket(a.substr(12) == "ws")
 	# 模拟主机本地按键：移动 + 开火，验证主机侧输入真的被采样（曾出现主机 WASD 无效的回归）
 	Input.action_press("move_right")
 	Input.action_press("fire")

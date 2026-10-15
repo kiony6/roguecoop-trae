@@ -1,4 +1,4 @@
-param([int]$Latency = 0)
+param([int]$Latency = 0, [string]$Transport = "udp")
 
 $ErrorActionPreference = "Stop"
 
@@ -15,7 +15,9 @@ $cliOut  = Join-Path $out "client.log"
 $cliErr  = Join-Path $out "client.err"
 
 $extra = @()
-if ($Latency -gt 0) { $extra = @("--", "--latency=$Latency") }
+if ($Latency -gt 0) { $extra += "--latency=$Latency" }
+if ($Transport -ne "udp") { $extra += "--transport=$Transport" }
+if ($extra.Count -gt 0) { $extra = @("--") + $extra }
 
 $hostProc = Start-Process -FilePath $godot -PassThru -NoNewWindow `
     -ArgumentList (@("--headless", "--path", $proj, "res://tools/net_test/net_test_host.tscn") + $extra) `

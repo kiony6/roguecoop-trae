@@ -1,3 +1,4 @@
+param([string]$Transport = "udp")
 $ErrorActionPreference = "Stop"
 
 $godot = "D:\Godot\Godot_v4.7.2-stable_win64_console.exe"
@@ -14,13 +15,13 @@ $cliOut = Join-Path $out "client.log"
 $cliErr = Join-Path $out "client.err"
 
 $srvProc = Start-Process -FilePath $godot -PassThru -NoNewWindow `
-    -ArgumentList @("--headless", "--path", $proj, "res://scenes/dedicated.tscn", "--", "--port=$port") `
+    -ArgumentList @("--headless", "--path", $proj, "res://scenes/dedicated.tscn", "--", "--port=$port", "--transport=$Transport") `
     -RedirectStandardOutput $srvOut -RedirectStandardError $srvErr
 
 Start-Sleep -Milliseconds 1500
 
 $cliProc = Start-Process -FilePath $godot -PassThru -NoNewWindow `
-    -ArgumentList @("--headless", "--path", $proj, "res://tools/net_test/net_test_client.tscn", "--", "--solo=1", "--port=$port") `
+    -ArgumentList @("--headless", "--path", $proj, "res://tools/net_test/net_test_client.tscn", "--", "--solo=1", "--port=$port", "--transport=$Transport") `
     -RedirectStandardOutput $cliOut -RedirectStandardError $cliErr
 
 $cliProc.WaitForExit(40000) | Out-Null

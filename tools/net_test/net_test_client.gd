@@ -42,6 +42,8 @@ func _ready() -> void:
 			Net.set_debug_latency_ms(int(a.substr(10)))
 		elif a.begins_with("--solo="):
 			_solo = int(a.substr(7)) != 0
+		elif a.begins_with("--transport="):
+			Net.set_websocket(a.substr(12) == "ws")
 
 	Net.connected_ok.connect(_on_connected)
 	Net.connection_failed.connect(_on_failed)
