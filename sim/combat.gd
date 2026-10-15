@@ -42,13 +42,13 @@ const XP_PER_SHARD := 5
 const XP_PER_BIG := 25
 
 # —— M3：倒地与救援 ——
+# M4.3：去掉流血永久阵亡——只要还有存活队友，倒地者可无限期/无限次被救起。
 const PLAYER_ALIVE := 0
 const PLAYER_DOWNED := 1
-const PLAYER_DEAD := 2
+const PLAYER_DEAD := 2  # 保留：仍被绘制与升级下发过滤引用，但不再由流血触发
 const REVIVE_HP := 50  # 被救起后恢复到的血量
 const REVIVE_RADIUS := 46.0  # 队友需在此半径内才能推进救援
 const REVIVE_HOLD := 2.0  # 需持续贴近的秒数
-const DOWN_BLEEDOUT := 20.0  # 倒地后无人救则永久阵亡的秒数
 const REVIVE_INVULN := 1.5  # 救起后的短暂无敌
 
 

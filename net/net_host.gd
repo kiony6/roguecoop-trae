@@ -29,7 +29,7 @@ var won := false
 var boss_id := 0
 
 var players := {}  # id -> {pos, move, buttons, hp, status, fire_cd, invuln,
-# down_timer, revive_progress, pickups, mods}
+# revive_progress, pickups, mods}
 var enemies := {}  # id -> {pos, hp, kind, touch_cd}
 var loot := {}  # id -> {pos, kind}
 var projectiles := {}  # id -> {pos, vel, ttl, dmg}
@@ -338,22 +338,17 @@ func _step_enemies(delta: float) -> void:
 			e["touch_cd"] = Combat.enemy_touch_interval(kind)
 			if p["hp"] <= 0:
 				p["status"] = Combat.PLAYER_DOWNED
-				p["down_timer"] = 0.0
 				p["revive_progress"] = 0.0
 			break
 
 
 func _step_downed(delta: float) -> void:
+	## M4.3：不再有流血永久阵亡——倒地者只要附近有存活队友即可被救起，可无限次。
 	for id in players:
 		var p: Dictionary = players[id]
 		if p["invuln"] > 0.0:
 			p["invuln"] = maxf(0.0, p["invuln"] - delta)
 		if p["status"] != Combat.PLAYER_DOWNED:
-			continue
-		p["down_timer"] += delta
-		if p["down_timer"] >= Combat.DOWN_BLEEDOUT:
-			p["status"] = Combat.PLAYER_DEAD
-			p["revive_progress"] = 0.0
 			continue
 		if _count_helpers(id) > 0:
 			p["revive_progress"] += delta
@@ -362,7 +357,6 @@ func _step_downed(delta: float) -> void:
 				p["hp"] = Combat.REVIVE_HP
 				p["invuln"] = Combat.REVIVE_INVULN
 				p["revive_progress"] = 0.0
-				p["down_timer"] = 0.0
 		else:
 			p["revive_progress"] = maxf(0.0, p["revive_progress"] - delta * 2.0)
 
@@ -465,14 +459,15 @@ func _add_loot(pos: Vector2, kind: int) -> void:
 
 
 func _check_run_over() -> void:
+	## M4.3：失败条件放宽为「场上无任何 PLAYER_ALIVE」——全员倒地/阵亡且无人可施救即当帧判负。
 	if run_over:
 		return
-	var any_not_dead := false
+	var any_alive := false
 	for id in players:
-		if players[id]["status"] != Combat.PLAYER_DEAD:
-			any_not_dead = true
+		if players[id]["status"] == Combat.PLAYER_ALIVE:
+			any_alive = true
 			break
-	if not any_not_dead and not players.is_empty():
+	if not any_alive and not players.is_empty():
 		run_over = true
 		won = false
 		return
@@ -554,7 +549,6 @@ func _new_player() -> Dictionary:
 		"status": Combat.PLAYER_ALIVE,
 		"fire_cd": 0.0,
 		"invuln": 0.0,
-		"down_timer": 0.0,
 		"revive_progress": 0.0,
 		"pickups": 0,
 		"weapon": Weapons.default_id(),

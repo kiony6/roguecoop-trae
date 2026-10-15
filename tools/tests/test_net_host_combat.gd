@@ -1,7 +1,7 @@
 extends RefCounted
 ## 主机权威逻辑测试（纯逻辑，无传输）。
 ## 覆盖：开火击杀→掉落→拾取、接触伤害、共享经验升级→每人独立选卡、
-## 倒地→救援→复苏、倒地未救→阵亡→失败结算、Boss 生成、Boss 数达标→胜利结算。
+## 倒地→救援→复苏、无存活玩家→失败结算（M4.3 起不再有永久阵亡）、Boss 生成、Boss 数达标→胜利结算。
 
 const Harness := preload("res://tools/tests/harness.gd")
 const NetHostLogic := preload("res://net/net_host.gd")
@@ -100,17 +100,18 @@ func run() -> int:
 	t.eq(h6.players[1]["status"], Combat.PLAYER_ALIVE, "队友贴近后完成救援")
 	t.eq(h6.players[1]["hp"], Combat.REVIVE_HP, "救起后恢复到固定血量")
 
-	# (8) 倒地未救 → 流血阵亡 → 全员阵亡失败结算
+	# (8) 单人倒地无人可救 → 立即判负；且不再发生永久阵亡
 	var h8 := NetHostLogic.new()
 	h8.reset()
 	h8.spawn_interval = 9999.0
 	h8.spawn_enemy(Vector2(0, 0))
 	for _i in range(480):
 		h8.physics_step(0.016)
+	t.eq(h8.players[1]["status"], Combat.PLAYER_DOWNED, "单人倒地保持倒地（不再永久阵亡）")
+	t.check(h8.run_over and not h8.won, "无存活玩家 → 立即结算失败")
 	for _i in range(1400):
 		h8.physics_step(0.016)
-	t.eq(h8.players[1]["status"], Combat.PLAYER_DEAD, "流血完毕永久阵亡")
-	t.check(h8.run_over and not h8.won, "全员阵亡 → 结算失败")
+	t.eq(h8.players[1]["status"], Combat.PLAYER_DOWNED, "长时间无人救仍为倒地，非永久阵亡")
 
 	# (9) Boss：击杀数达阈值刷新 Boss
 	var h9 := NetHostLogic.new()
@@ -212,5 +213,29 @@ func run() -> int:
 	h17._kill_enemy(eid17)
 	t.eq(h17.loot.size(), Combat.MAX_LOOT, "掉落数被硬上限约束")
 	t.check(not h17.loot.has(100), "超限时淘汰最旧掉落")
+
+	# (18) 全员倒地（无人可施救）→ 当帧判负
+	var h18 := NetHostLogic.new()
+	h18.reset()
+	h18.spawn_interval = 9999.0
+	h18.add_player(2)
+	h18.set_remote_input(2, Vector2.ZERO, 0)
+	h18.players[1]["status"] = Combat.PLAYER_DOWNED
+	h18.players[2]["status"] = Combat.PLAYER_DOWNED
+	h18.physics_step(0.016)
+	t.check(h18.run_over and not h18.won, "全员倒地无人可救 → 立即判负")
+
+	# (19) 仍有存活队友 → 不判负，倒地者可被反复救起
+	var h19 := NetHostLogic.new()
+	h19.reset()
+	h19.spawn_interval = 9999.0
+	h19.add_player(2)
+	h19.set_remote_input(2, Vector2.ZERO, 0)
+	h19.players[1]["status"] = Combat.PLAYER_DOWNED
+	h19.players[2]["pos"] = Vector2(0, 20)
+	for _i in range(140):
+		h19.physics_step(0.016)
+	t.eq(h19.players[1]["status"], Combat.PLAYER_ALIVE, "队友存活时倒地者被救起")
+	t.check(not h19.run_over, "仍有存活玩家 → 不判负")
 
 	return t.report("NetHostCombat")
