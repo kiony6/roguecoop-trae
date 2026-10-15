@@ -24,6 +24,7 @@ func _ready() -> void:
 	Net.player_joined.connect(_on_joined)
 	Net.player_left.connect(_on_left)
 	Net.run_over.connect(_on_run_over)
+	Net.run_reset.connect(_on_run_reset)
 	_start()
 
 
@@ -51,6 +52,10 @@ func _on_joined(id: int) -> void:
 
 func _on_left(id: int) -> void:
 	print("[Dedicated] player_left id=%d" % id)
+
+
+func _on_run_reset(idle_seconds: float) -> void:
+	print("[Dedicated] idle reset after %.1fs empty: run reset to wave 1" % idle_seconds)
 
 
 func _on_run_over(won: bool, stats: Dictionary) -> void:

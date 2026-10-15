@@ -12,6 +12,7 @@ signal world_state(
 signal upgrade_offer(choices: PackedInt32Array)
 signal player_upgrade(player_id: int, card_id: int)
 signal run_over(won: bool, stats: Dictionary)
+signal run_reset(idle_seconds: float)
 signal room_ready
 signal connected_ok(local_id: int)
 signal connection_failed
@@ -38,6 +39,7 @@ var _known_peers: Array = []
 var _run_over_sent := false
 var _input_queue: Array = []
 var _snap_queue: Array = []
+var _idle_resets_seen := 0
 
 
 func _ready() -> void:
@@ -121,6 +123,7 @@ func host_start(port: int, as_dedicated: bool = false, bind_ip: String = "") -> 
 	_host.reset(as_dedicated)
 	_known_peers.clear()
 	_run_over_sent = false
+	_idle_resets_seen = 0
 	_input_queue.clear()
 	_snap_queue.clear()
 	mode = Mode.HOST
@@ -234,6 +237,7 @@ func _physics_process(delta: float) -> void:
 			_host.local_buttons = _read_buttons()
 		if not _host.run_over:
 			_host.physics_step(delta)
+			_announce_idle_reset()
 		if not dedicated:
 			# 本机渲染每物理帧刷新（60Hz），直连完整权威状态
 			world_state.emit(
@@ -280,6 +284,14 @@ func _offer_to_players() -> void:
 			upgrade_offer.emit(packed)
 		else:
 			_rpc_upgrade_offer.rpc_id(peer, packed)
+
+
+func _announce_idle_reset() -> void:
+	## M5.2：专用服务器空场超时归零只发生一次（幂等），这里按计数变化上报一次信号供运维日志使用。
+	if not dedicated or _host.idle_resets == _idle_resets_seen:
+		return
+	_idle_resets_seen = _host.idle_resets
+	run_reset.emit(_host.idle_reset_seconds)
 
 
 func _check_run_over() -> void:
