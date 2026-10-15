@@ -1,11 +1,14 @@
 extends RefCounted
-## 网络协议常量与二进制编解码（M3）。
+## 网络协议常量与二进制编解码（M4）。
 ## 全部静态方法，无实例状态。
 ## 输入帧：5 字节。
-## 快照头：u32 tick | u8 level | u16 xp | u16 kills | u8 pc | u8 ec | u8 lc = 12 字节
-## 玩家段：u32 id | f32 x | f32 y | u8 hp | u8 status | u8 revive01 = 15 字节
+## 快照头：u32 tick | u8 level | u16 xp | u16 kills | u8 pc | u8 ec | u8 lc | u8 prc = 13 字节
+## 玩家段：u32 id | f32 x | f32 y | u8 hp | u8 status | u8 revive01 | u8 weapon = 16 字节
 ## 敌人段：u32 id | f32 x | f32 y | u8 hp | u8 kind = 14 字节
 ## 掉落段：u32 id | f32 x | f32 y | u8 kind = 13 字节
+## 弹丸段：u32 id | f32 x | f32 y | i8 dirx | i8 diry | u8 kind = 15 字节
+## 房间：u8 wc | wc*(f32 x | f32 y | f32 w | f32 h) = 1 + 16*wc 字节
+## 注意：ec/lc/prc 三个计数字节在布局上位于各自段之前（ec 紧接玩家段之后）。
 
 const PROTOCOL_VERSION := 1
 const DEFAULT_PORT := 25600
@@ -16,10 +19,13 @@ const CH_CONTROL := 0  # 可靠通道
 const CH_DATA := 1  # 不可靠有序通道
 
 const INPUT_BYTES := 5
-const HEADER_BYTES := 12
-const PLAYER_BYTES := 15
+const HEADER_BYTES := 13
+const PLAYER_BYTES := 16
 const ENEMY_BYTES := 14
 const LOOT_BYTES := 13
+const PROJ_BYTES := 15
+const ROOM_BYTES := 16
+
 
 # ---------------- 输入帧 ----------------
 # 布局: i8 move_x | i8 move_y | i8 aim_x | i8 aim_y | u8 buttons
@@ -46,19 +52,24 @@ static func decode_input(b: PackedByteArray) -> Dictionary:
 
 
 # ---------------- 快照 ----------------
-# 布局: u32 tick
-#     | u8 level | u16 xp | u16 kills | u8 pc
-#     | pc*(u32 id | f32 x | f32 y | u8 hp | u8 status | u8 revive01)
+# 布局: u32 tick | u8 level | u16 xp | u16 kills | u8 pc
+#     | pc*(u32 id | f32 x | f32 y | u8 hp | u8 status | u8 revive01 | u8 weapon)
 #     | u8 ec | ec*(u32 id | f32 x | f32 y | u8 hp | u8 kind)
 #     | u8 lc | lc*(u32 id | f32 x | f32 y | u8 kind)
+#     | u8 prc | prc*(u32 id | f32 x | f32 y | i8 dx | i8 dy | u8 kind)
 # 注意：Godot 4 的对端 unique_id 为随机大整数（可达 2^31），实体 id 一律 u32。
 
 
 static func encode_snapshot(
-	tick: int, meta: Dictionary, players: Array, enemies: Array = [], loot: Array = []
+	tick: int,
+	meta: Dictionary,
+	players: Array,
+	enemies: Array = [],
+	loot: Array = [],
+	projectiles: Array = []
 ) -> PackedByteArray:
 	var b := PackedByteArray()
-	b.resize(snapshot_size(players.size(), enemies.size(), loot.size()))
+	b.resize(snapshot_size(players.size(), enemies.size(), loot.size(), projectiles.size()))
 	b.encode_u32(0, tick)
 	b[4] = int(meta.get("level", 1)) & 0xFF
 	b.encode_u16(5, int(meta.get("xp", 0)))
@@ -72,6 +83,7 @@ static func encode_snapshot(
 		b[o + 12] = int(p.get("hp", 100)) & 0xFF
 		b[o + 13] = int(p.get("status", 0)) & 0xFF
 		b[o + 14] = int(p.get("revive01", 0)) & 0xFF
+		b[o + 15] = int(p.get("weapon", 0)) & 0xFF
 		o += PLAYER_BYTES
 	b[o] = enemies.size()
 	o += 1
@@ -90,6 +102,17 @@ static func encode_snapshot(
 		b.encode_float(o + 8, float(l["pos"].y))
 		b[o + 12] = int(l.get("kind", 0)) & 0xFF
 		o += LOOT_BYTES
+	b[o] = projectiles.size()
+	o += 1
+	for pj in projectiles:
+		var dir: Vector2 = pj.get("dir", Vector2.RIGHT)
+		b.encode_u32(o, int(pj["id"]))
+		b.encode_float(o + 4, float(pj["pos"].x))
+		b.encode_float(o + 8, float(pj["pos"].y))
+		b[o + 12] = _quant8(dir.x)
+		b[o + 13] = _quant8(dir.y)
+		b[o + 14] = int(pj.get("kind", 0)) & 0xFF
+		o += PROJ_BYTES
 	return b
 
 
@@ -115,6 +138,7 @@ static func decode_snapshot(b: PackedByteArray) -> Dictionary:
 					"hp": b[o + 12],
 					"status": b[o + 13],
 					"revive01": b[o + 14],
+					"weapon": b[o + 15],
 				}
 			)
 		)
@@ -156,17 +180,80 @@ static func decode_snapshot(b: PackedByteArray) -> Dictionary:
 				)
 			)
 			o += LOOT_BYTES
+	var projectiles: Array = []
+	if o < b.size():
+		var prc: int = b[o]
+		o += 1
+		for _i in prc:
+			if o + PROJ_BYTES > b.size():
+				break
+			(
+				projectiles
+				. append(
+					{
+						"id": b.decode_u32(o),
+						"pos": Vector2(b.decode_float(o + 4), b.decode_float(o + 8)),
+						"dir": Vector2(_dequant8(b[o + 12]), _dequant8(b[o + 13])),
+						"kind": b[o + 14],
+					}
+				)
+			)
+			o += PROJ_BYTES
 	return {
 		"tick": b.decode_u32(0),
 		"meta": meta,
 		"players": players,
 		"enemies": enemies,
 		"loot": loot,
+		"projectiles": projectiles,
 	}
 
 
-static func snapshot_size(pc: int, ec: int = 0, lc: int = 0) -> int:
-	return HEADER_BYTES + pc * PLAYER_BYTES + ec * ENEMY_BYTES + lc * LOOT_BYTES
+static func snapshot_size(pc: int, ec: int = 0, lc: int = 0, prc: int = 0) -> int:
+	return HEADER_BYTES + pc * PLAYER_BYTES + ec * ENEMY_BYTES + lc * LOOT_BYTES + prc * PROJ_BYTES
+
+
+# ---------------- 房间 ----------------
+# 布局: u8 wc | wc*(f32 x | f32 y | f32 w | f32 h)
+
+
+static func encode_room(walls: Array) -> PackedByteArray:
+	var b := PackedByteArray()
+	b.resize(1 + walls.size() * ROOM_BYTES)
+	b[0] = walls.size()
+	var o := 1
+	for w in walls:
+		var r: Rect2 = w
+		b.encode_float(o, r.position.x)
+		b.encode_float(o + 4, r.position.y)
+		b.encode_float(o + 8, r.size.x)
+		b.encode_float(o + 12, r.size.y)
+		o += ROOM_BYTES
+	return b
+
+
+static func decode_room(b: PackedByteArray) -> Array:
+	var walls: Array = []
+	if b.size() < 1:
+		return walls
+	var wc: int = b[0]
+	var o := 1
+	for _i in wc:
+		if o + ROOM_BYTES > b.size():
+			break
+		(
+			walls
+			. append(
+				Rect2(
+					b.decode_float(o),
+					b.decode_float(o + 4),
+					b.decode_float(o + 8),
+					b.decode_float(o + 12)
+				)
+			)
+		)
+		o += ROOM_BYTES
+	return walls
 
 
 # ---------------- 量化辅助 ----------------
