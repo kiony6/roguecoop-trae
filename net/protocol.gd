@@ -10,13 +10,22 @@ extends RefCounted
 ## 房间：u8 wc | wc*(f32 x | f32 y | f32 w | f32 h) = 1 + 16*wc 字节
 ## 注意：ec/lc/prc 三个计数字节在布局上位于各自段之前（ec 紧接玩家段之后）。
 
-const PROTOCOL_VERSION := 2
+const PROTOCOL_VERSION := 3
 const DEFAULT_PORT := 25600
 const MAX_PLAYERS := 4  # 协议上限（实际按 2 人验收）
 const INPUT_RATE := 30  # 客户端输入上报 Hz
 const SNAPSHOT_RATE := 20  # 主机快照广播 Hz
 const CH_CONTROL := 0  # 可靠通道
 const CH_DATA := 1  # 不可靠有序通道
+
+# ---------------- M6.2 连接角色与账号操作码 ----------------
+# 注意：这些只是控制通道的分派值，不进入任何二进制帧，
+# HEADER_BYTES / PLAYER_BYTES / ENEMY_BYTES / LOOT_BYTES / PROJ_BYTES / ROOM_BYTES 全部不变。
+const ROLE_PLAYER := 0  # 进对局（默认）
+const ROLE_LOBBY := 1  # 只占连接走账号 RPC，不进对局
+const OP_REGISTER := 0
+const OP_LOGIN := 1
+const OP_LOGOUT := 2
 
 const INPUT_BYTES := 5
 const HEADER_BYTES := 14
@@ -25,6 +34,12 @@ const ENEMY_BYTES := 14
 const LOOT_BYTES := 13
 const PROJ_BYTES := 15
 const ROOM_BYTES := 16
+
+
+static func version_ok(v: int) -> bool:
+	## 连接期版本握手判据（spec §5.3）。
+	return v == PROTOCOL_VERSION
+
 
 # ---------------- 输入帧 ----------------
 # 布局: i8 move_x | i8 move_y | i8 aim_x | i8 aim_y | u8 buttons

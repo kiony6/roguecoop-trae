@@ -43,18 +43,20 @@ secret = true
 [node name="RegisterButton" type="Button" parent="Center/Card/Box"]
 custom_minimum_size = Vector2(0, 56)
 theme_type_variation = &"PrimaryButton"
-disabled = true
-tooltip_text = "账号系统见子项目 2"
 text = "注册"
+
+[node name="Status" type="Label" parent="Center/Card/Box"]
+theme_type_variation = &"Caption"
+horizontal_alignment = 1
+
+[node name="Error" type="Label" parent="Center/Card/Box"]
+theme_type_variation = &"Caption"
+horizontal_alignment = 1
+autowrap_mode = 2
 
 [node name="BackToLogin" type="Button" parent="Center/Card/Box"]
 theme_type_variation = &"TextButton"
 text = "← 返回登录"
-
-[node name="Footnote" type="Label" parent="Center/Card/Box"]
-theme_type_variation = &"Caption"
-text = "占位页：真实功能见子项目 2"
-horizontal_alignment = 1
 
 [node name="BackButton" type="Button" parent="."]
 offset_left = 16.0

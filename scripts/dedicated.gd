@@ -6,10 +6,16 @@ extends Node
 
 const Protocol := preload("res://net/protocol.gd")
 
+const AccountServerLib := preload("res://net/account_server.gd")
+
+const DEFAULT_DATA_PATH := "user://accounts.json"
+
 const RUN_RESET_DELAY := 20.0  # 一局结束后等这么久再自动重开（给客户端留时间看完结算）
 
 var _port := Protocol.DEFAULT_PORT
 var _bind := ""
+var _data := DEFAULT_DATA_PATH
+var _accounts = null
 var _restarting := false
 
 
@@ -21,6 +27,13 @@ func _ready() -> void:
 			_bind = a.substr(7)
 		elif a.begins_with("--transport="):
 			Net.set_websocket(a.substr(12) == "ws")
+		elif a.begins_with("--data="):
+			_data = a.substr(7)
+	_accounts = AccountServerLib.new(_data)
+	_accounts.load_from_disk()
+	Net.enable_accounts(_accounts)
+	Net.account_registered.connect(_on_registered)
+	Net.account_session_closed.connect(_on_session_closed)
 	Net.player_joined.connect(_on_joined)
 	Net.player_left.connect(_on_left)
 	Net.run_over.connect(_on_run_over)
@@ -36,14 +49,28 @@ func _start() -> void:
 		return
 	print(
 		(
-			"[Dedicated] listening port=%d bind=%s transport=%s"
+			"[Dedicated] listening port=%d bind=%s transport=%s accounts=%d"
 			% [
 				_port,
 				"0.0.0.0" if _bind.is_empty() else _bind,
-				"ws/tcp" if Net.transport_ws else "udp/enet"
+				"ws/tcp" if Net.transport_ws else "udp/enet",
+				_accounts.count(),
 			]
 		)
 	)
+
+
+func _on_registered(ok: bool, err_code: int) -> void:
+	print(
+		(
+			"[Dedicated] account registered ok=%s err=%d accounts=%d"
+			% [ok, err_code, _accounts.count()]
+		)
+	)
+
+
+func _on_session_closed() -> void:
+	print("[Dedicated] account session closed")
 
 
 func _on_joined(id: int) -> void:

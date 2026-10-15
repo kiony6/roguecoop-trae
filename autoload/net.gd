@@ -1,7 +1,9 @@
-extends Node
+extends Node  # gdlint:ignore=max-public-methods
 ## 网络门面（autoload 名 "Net"）。
 ## 唯一的 @rpc 入口：所有 RPC 方法都挂在本节点上，保证主机/客户端 RPC 路径一致。
 ## 传输与模拟细节分别委托给 net/net_host.gd 与 net/net_client.gd。
+## 注：本节点即 Net 的公开 API 集合，公共方法数必然超过 gdlint 默认上限 20，
+## 故在第 1 行显式豁免 max-public-methods（工程无 .gdlintrc）。
 
 signal player_joined(player_id: int)
 signal player_left(player_id: int)
@@ -17,6 +19,11 @@ signal room_ready
 signal connected_ok(local_id: int)
 signal connection_failed
 signal disconnected
+signal auth_challenge(salt_b64: String, nonce_b64: String)
+signal auth_result(ok: bool, username: String, err_code: int)
+signal account_registered(ok: bool, err_code: int)
+signal account_session_closed
+signal version_mismatch(server_version: int)
 
 enum Mode { NONE, HOST, CLIENT }
 
@@ -24,12 +31,17 @@ const Protocol := preload("res://net/protocol.gd")
 const NetHostLogic := preload("res://net/net_host.gd")
 const NetClientLogic := preload("res://net/net_client.gd")
 const AoI := preload("res://net/aoi.gd")
+const AccountLib := preload("res://net/account.gd")
+
+const HANDSHAKE_TIMEOUT_MS := 5000  # 连接期 declare / hello 未到达的容忍窗口
 
 var mode: Mode = Mode.NONE
 var local_id := 0
 var dedicated := false
 var debug_latency_ms := 0  # 调试用单程人为延迟（毫秒），0 = 关闭；RTT ≈ 2×该值
 var transport_ws := false  # true = TCP/WebSocket，false = UDP/ENet（默认）
+var role := Protocol.ROLE_PLAYER  # 本端连接角色：ROLE_PLAYER 进对局 / ROLE_LOBBY 只走账号 RPC
+var forced_version := -1  # >= 0 时替代 Protocol.PROTOCOL_VERSION（仅供测试注入）
 
 var _host := NetHostLogic.new()
 var _client := NetClientLogic.new()
@@ -40,6 +52,10 @@ var _run_over_sent := false
 var _input_queue: Array = []
 var _snap_queue: Array = []
 var _idle_resets_seen := 0
+var _account_server = null  # 账号服务实例（HOST 且启用账号时非空；由 dedicated.gd 注入）
+var _declared: Dictionary = {}  # 服务端：peer -> {"version": int, "role": int}
+var _handshake_deadlines: Dictionary = {}  # 服务端：peer -> declare 截止毫秒
+var _hello_deadline := -1  # 客户端：等 hello 的截止毫秒
 
 
 func _ready() -> void:
@@ -78,6 +94,47 @@ func set_websocket(enabled: bool) -> void:
 func ws_url(address: String, port: int) -> String:
 	## WebSocket 客户端地址：create_client 需要带 scheme 的完整 URL。
 	return "ws://%s:%d" % [address, port]
+
+
+func set_role(r: int) -> void:
+	role = r
+
+
+func set_forced_version(v: int) -> void:
+	forced_version = v
+
+
+func desired_version() -> int:
+	return forced_version if forced_version >= 0 else Protocol.PROTOCOL_VERSION
+
+
+func enable_accounts(server) -> void:
+	## 专服注入账号服务实例；仅 HOST 模式使用。
+	_account_server = server
+
+
+func accounts_enabled() -> bool:
+	return _account_server != null
+
+
+func send_register(username: String, salt_b64: String, verifier_b64: String) -> void:
+	if mode == Mode.CLIENT:
+		_rpc_register.rpc_id(1, username, salt_b64, verifier_b64)
+
+
+func send_login_begin(username: String) -> void:
+	if mode == Mode.CLIENT:
+		_rpc_login_begin.rpc_id(1, username)
+
+
+func send_login_proof(proof_b64: String) -> void:
+	if mode == Mode.CLIENT:
+		_rpc_login_proof.rpc_id(1, proof_b64)
+
+
+func send_logout() -> void:
+	if mode == Mode.CLIENT:
+		_rpc_logout.rpc_id(1)
 
 
 func is_run_over() -> bool:
@@ -124,6 +181,8 @@ func host_start(port: int, as_dedicated: bool = false, bind_ip: String = "") -> 
 	_known_peers.clear()
 	_run_over_sent = false
 	_idle_resets_seen = 0
+	_declared.clear()
+	_handshake_deadlines.clear()
 	_input_queue.clear()
 	_snap_queue.clear()
 	mode = Mode.HOST
@@ -147,6 +206,8 @@ func host_stop() -> void:
 	dedicated = false
 	local_id = 0
 	_input_queue.clear()
+	_declared.clear()
+	_handshake_deadlines.clear()
 	_snap_queue.clear()
 
 
@@ -171,6 +232,7 @@ func client_connect(address: String, port: int) -> Error:
 	multiplayer.multiplayer_peer = peer
 	_client.reset()
 	_known_peers.clear()
+	_hello_deadline = -1
 	_run_over_sent = false
 	mode = Mode.CLIENT
 	local_id = 0
@@ -187,6 +249,7 @@ func client_disconnect() -> void:
 	multiplayer.multiplayer_peer = null
 	_client.reset()
 	local_id = 0
+	_hello_deadline = -1
 
 
 # ---------------- 对外输入 ----------------
@@ -230,6 +293,7 @@ func _read_buttons() -> int:
 
 func _physics_process(delta: float) -> void:
 	if mode == Mode.HOST:
+		_check_handshakes()
 		_drain_input_queue()
 		if not dedicated:
 			# 主机本地玩家的输入在这里采样：不依赖场景树中是否恰好存在玩家节点
@@ -258,6 +322,7 @@ func _physics_process(delta: float) -> void:
 			_snap_accum = 0.0
 			_send_snapshots()
 	elif mode == Mode.CLIENT:
+		_check_hello()
 		_drain_snap_queue()
 		# M4.5：结算后停止上报输入（仍继续应用快照，保持画面与冻结的权威状态一致）
 		if local_id != 0 and not _client.run_over:
@@ -393,22 +458,38 @@ func _apply_snapshot(payload: PackedByteArray) -> void:
 func _on_peer_connected(id: int) -> void:
 	if mode != Mode.HOST:
 		return
+	# M6.2：不再「连接即入局」——先下发 hello，等客户端 declare 通过后再按角色放行
+	_rpc_hello.rpc_id(id, desired_version())
+	_handshake_deadlines[id] = Time.get_ticks_msec() + HANDSHAKE_TIMEOUT_MS
+
+
+func _on_peer_disconnected(id: int) -> void:
+	if mode != Mode.HOST:
+		return
+	_handshake_deadlines.erase(id)
+	_declared.erase(id)
+	if _account_server != null:
+		_account_server.on_peer_left(id)
+	if _host.has_player(id):
+		_host.remove_player(id)
+		player_left.emit(id)
+		_broadcast_peer_list()
+
+
+func _admit(id: int) -> void:
+	## declare 校验通过后按角色放行：ROLE_PLAYER 入局，ROLE_LOBBY 只占连接。
+	var info: Dictionary = _declared.get(id, {})
+	if int(info.get("role", Protocol.ROLE_PLAYER)) != Protocol.ROLE_PLAYER:
+		return
 	_host.add_player(id)
 	_rpc_room.rpc_id(id, Protocol.encode_room(_host.room_walls))
 	player_joined.emit(id)
 	_broadcast_peer_list()
 
 
-func _on_peer_disconnected(id: int) -> void:
-	if mode != Mode.HOST:
-		return
-	_host.remove_player(id)
-	player_left.emit(id)
-	_broadcast_peer_list()
-
-
 func _on_connected_to_server() -> void:
 	local_id = multiplayer.get_unique_id()
+	_hello_deadline = Time.get_ticks_msec() + HANDSHAKE_TIMEOUT_MS
 	connected_ok.emit(local_id)
 
 
@@ -416,6 +497,7 @@ func _on_connection_failed() -> void:
 	mode = Mode.NONE
 	set_physics_process(false)
 	multiplayer.multiplayer_peer = null
+	_hello_deadline = -1
 	connection_failed.emit()
 
 
@@ -423,7 +505,34 @@ func _on_server_disconnected() -> void:
 	mode = Mode.NONE
 	set_physics_process(false)
 	multiplayer.multiplayer_peer = null
+	_hello_deadline = -1
 	disconnected.emit()
+
+
+func _check_handshakes() -> void:
+	if _handshake_deadlines.is_empty():
+		return
+	var now := Time.get_ticks_msec()
+	for peer in _handshake_deadlines.keys():
+		if now < int(_handshake_deadlines[peer]):
+			continue
+		printerr("[Net] declare timeout peer=%d" % peer)
+		_handshake_deadlines.erase(peer)
+
+
+func _check_hello() -> void:
+	if _hello_deadline < 0 or Time.get_ticks_msec() < _hello_deadline:
+		return
+	_hello_deadline = -1
+	printerr("[Net] hello timeout from server")
+	_disconnect_after_mismatch()
+
+
+func _disconnect_after_mismatch() -> void:
+	## 延迟 0.5s 断开：给上行的 declare 留送达窗口，便于服务端日志取证。
+	await get_tree().create_timer(0.5).timeout
+	if mode == Mode.CLIENT:
+		client_disconnect()
 
 
 func _broadcast_peer_list() -> void:
@@ -461,7 +570,7 @@ func _rpc_snapshot(_tick_in: int, payload: PackedByteArray) -> void:
 
 @rpc("authority", "call_remote", "reliable", 0)
 func _rpc_peer_list(ids: PackedInt32Array) -> void:
-	if mode != Mode.CLIENT:
+	if mode != Mode.CLIENT or role != Protocol.ROLE_PLAYER:
 		return
 	var my_id := multiplayer.get_unique_id()
 	for id in ids:
@@ -514,3 +623,121 @@ func _rpc_run_over(won: bool, kills: int, level: int, boss_kills: int, seconds: 
 	run_over.emit(
 		won, {"kills": kills, "level": level, "boss_kills": boss_kills, "seconds": seconds}
 	)
+
+
+@rpc("authority", "call_remote", "reliable", 0)
+func _rpc_hello(server_version: int) -> void:
+	if mode != Mode.CLIENT:
+		return
+	_hello_deadline = -1
+	if server_version != desired_version():
+		printerr("[Net] version mismatch server=%d client=%d" % [server_version, desired_version()])
+		version_mismatch.emit(server_version)
+		_disconnect_after_mismatch()
+		return
+	_rpc_declare.rpc_id(1, desired_version(), role)
+
+
+@rpc("authority", "call_remote", "reliable", 0)
+func _rpc_login_challenge(salt_b64: String, nonce_b64: String, err_code: int) -> void:
+	if mode != Mode.CLIENT:
+		return
+	if err_code != AccountLib.ERR.OK:
+		auth_result.emit(false, "", err_code)
+		return
+	auth_challenge.emit(salt_b64, nonce_b64)
+
+
+@rpc("authority", "call_remote", "reliable", 0)
+func _rpc_auth_result(op: int, ok: bool, username: String, err_code: int) -> void:
+	if mode != Mode.CLIENT:
+		return
+	match op:
+		Protocol.OP_REGISTER:
+			account_registered.emit(ok, err_code)
+		Protocol.OP_LOGIN:
+			auth_result.emit(ok, username, err_code)
+		Protocol.OP_LOGOUT:
+			account_session_closed.emit()
+
+
+@rpc("any_peer", "call_remote", "reliable", 0)
+func _rpc_declare(client_version: int, peer_role: int) -> void:
+	if mode != Mode.HOST:
+		return
+	var sender := multiplayer.get_remote_sender_id()
+	if sender == 0 or sender == 1:
+		return
+	_handshake_deadlines.erase(sender)
+	if client_version != desired_version():
+		printerr(
+			(
+				"[Net] declare rejected peer=%d version=%d want=%d"
+				% [sender, client_version, desired_version()]
+			)
+		)
+		return
+	_declared[sender] = {"version": client_version, "role": peer_role}
+	_admit(sender)
+
+
+@rpc("any_peer", "call_remote", "reliable", 0)
+func _rpc_register(username: String, salt_b64: String, verifier_b64: String) -> void:
+	if mode != Mode.HOST:
+		return
+	var sender := multiplayer.get_remote_sender_id()
+	if sender == 0 or sender == 1:
+		return
+	var code := AccountLib.ERR.UNSUPPORTED
+	if _account_server != null:
+		code = _account_server.register(sender, username, salt_b64, verifier_b64)
+	account_registered.emit(code == AccountLib.ERR.OK, code)  # 偏离 9：HOST 侧也发一份，供专服打日志
+	_rpc_auth_result.rpc_id(sender, Protocol.OP_REGISTER, code == AccountLib.ERR.OK, username, code)
+
+
+@rpc("any_peer", "call_remote", "reliable", 0)
+func _rpc_login_begin(username: String) -> void:
+	if mode != Mode.HOST:
+		return
+	var sender := multiplayer.get_remote_sender_id()
+	if sender == 0 or sender == 1:
+		return
+	if _account_server == null:
+		_rpc_login_challenge.rpc_id(sender, "", "", AccountLib.ERR.UNSUPPORTED)
+		return
+	var res: Dictionary = _account_server.begin_login(sender, username)
+	if not bool(res["ok"]):
+		_rpc_login_challenge.rpc_id(sender, "", "", int(res["err"]))
+		return
+	_rpc_login_challenge.rpc_id(
+		sender, String(res["salt"]), String(res["nonce"]), AccountLib.ERR.OK
+	)
+
+
+@rpc("any_peer", "call_remote", "reliable", 0)
+func _rpc_login_proof(proof_b64: String) -> void:
+	if mode != Mode.HOST:
+		return
+	var sender := multiplayer.get_remote_sender_id()
+	if sender == 0 or sender == 1:
+		return
+	var code := AccountLib.ERR.UNSUPPORTED
+	var uname := ""
+	if _account_server != null:
+		var res: Dictionary = _account_server.finish_login(sender, proof_b64)
+		code = int(res["err"])
+		uname = String(res["username"])
+	_rpc_auth_result.rpc_id(sender, Protocol.OP_LOGIN, code == AccountLib.ERR.OK, uname, code)
+
+
+@rpc("any_peer", "call_remote", "reliable", 0)
+func _rpc_logout() -> void:
+	if mode != Mode.HOST:
+		return
+	var sender := multiplayer.get_remote_sender_id()
+	if sender == 0 or sender == 1:
+		return
+	if _account_server != null:
+		_account_server.logout(sender)
+	account_session_closed.emit()  # 偏离 9：HOST 侧也发一份，供专服打日志
+	_rpc_auth_result.rpc_id(sender, Protocol.OP_LOGOUT, true, "", AccountLib.ERR.OK)

@@ -20,6 +20,7 @@ config/icon="res://icon.svg"
 
 Boot="*res://autoload/boot.gd"
 Net="*res://autoload/net.gd"
+Account="*res://autoload/account.gd"
 
 [display]
 

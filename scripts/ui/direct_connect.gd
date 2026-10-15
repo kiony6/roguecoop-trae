@@ -45,6 +45,8 @@ func _on_back_pressed() -> void:
 
 
 func _on_host_pressed() -> void:
+	Account.disconnect_lobby()
+	Net.set_role(Protocol.ROLE_PLAYER)
 	Net.set_websocket(_transport.selected == 1)
 	var err := Net.host_start(Protocol.DEFAULT_PORT)
 	if err != OK:
@@ -60,6 +62,8 @@ func _on_join_pressed() -> void:
 	var port := _port.text.strip_edges().to_int()
 	if port <= 0 or port > 65535:
 		port = Protocol.DEFAULT_PORT
+	Account.disconnect_lobby()
+	Net.set_role(Protocol.ROLE_PLAYER)
 	Net.set_websocket(_transport.selected == 1)
 	var err := Net.client_connect(ip, port)
 	if err != OK:

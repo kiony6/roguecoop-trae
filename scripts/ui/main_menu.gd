@@ -5,6 +5,7 @@ extends Control
 
 
 func _ready() -> void:
+	Account.disconnect_lobby()  # 偏离 6：返回主菜单即断开大厅，主菜单恒为未登录
 	$Center/Box/LobbyButton.pressed.connect(_on_lobby_pressed)
 	$Center/Box/DirectButton.pressed.connect(_on_direct_pressed)
 	$Center/Box/Links/LeaderboardButton.pressed.connect(_on_leaderboard_pressed)

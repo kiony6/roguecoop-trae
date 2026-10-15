@@ -17,6 +17,9 @@ const SUITES: Array = [
 	preload("res://tools/tests/test_net_transport.gd"),
 	preload("res://tools/tests/test_net_idle.gd"),
 	preload("res://tools/tests/test_ui_theme.gd"),
+	preload("res://tools/tests/test_account.gd"),
+	preload("res://tools/tests/test_store.gd"),
+	preload("res://tools/tests/test_account_server.gd"),
 ]
 
 

@@ -31,6 +31,10 @@ theme_type_variation = &"Title"
 text = "联机大厅"
 horizontal_alignment = 1
 
+[node name="Who" type="Label" parent="Center/Card/Box"]
+theme_type_variation = &"Caption"
+horizontal_alignment = 1
+
 [node name="CreateButton" type="Button" parent="Center/Card/Box"]
 custom_minimum_size = Vector2(0, 56)
 theme_type_variation = &"PrimaryButton"
@@ -48,6 +52,10 @@ placeholder_text = "组队码（6 位数字）"
 [node name="JoinButton" type="Button" parent="Center/Card/Box"]
 custom_minimum_size = Vector2(0, 48)
 text = "加入"
+
+[node name="LogoutButton" type="Button" parent="Center/Card/Box"]
+theme_type_variation = &"TextButton"
+text = "退出登录"
 
 [node name="Footnote" type="Label" parent="Center/Card/Box"]
 theme_type_variation = &"Caption"
