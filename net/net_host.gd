@@ -92,9 +92,11 @@ func set_remote_input(id: int, move: Vector2, buttons: int) -> void:
 
 func spawn_enemy(pos: Vector2, kind: int = Combat.ENEMY_KIND_NORMAL) -> int:
 	var eid := _alloc_id()
+	var full := Waves.enemy_hp(kind, wave)
 	enemies[eid] = {
 		"pos": pos,
-		"hp": Waves.enemy_hp(kind, wave),
+		"hp": full,
+		"max_hp": full,
 		"kind": kind,
 		"touch_cd": 0.0,
 	}
@@ -169,7 +171,7 @@ func enemy_states() -> Array:
 				{
 					"id": id,
 					"pos": enemies[id]["pos"],
-					"hp": enemies[id]["hp"],
+					"hp01": _hp01(enemies[id]),
 					"kind": enemies[id]["kind"],
 				}
 			)
@@ -496,6 +498,12 @@ func _count_helpers(id: int) -> int:
 
 func _revive01(p: Dictionary) -> int:
 	return clampi(roundi(float(p["revive_progress"]) / Combat.REVIVE_HOLD * 255.0), 0, 255)
+
+
+func _hp01(e: Dictionary) -> int:
+	## 血条比例，分母与主机权威血量同源（生成时定档），避免与波次放大后的绝对值错配。
+	var full := maxi(1, int(e.get("max_hp", 1)))
+	return clampi(roundi(float(e["hp"]) / float(full) * 255.0), 0, 255)
 
 
 func _nearest_alive_player_id(pos: Vector2) -> int:

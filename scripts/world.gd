@@ -113,7 +113,7 @@ func _sync_enemies(enemies: Array) -> void:
 		var node: Node2D = _enemy_nodes.get(id)
 		if node == null:
 			node = _spawn_enemy(id)
-		node.push_authoritative(e["pos"], int(e.get("hp", 0)), int(e.get("kind", 0)))
+		node.push_authoritative(e["pos"], int(e.get("hp01", 255)), int(e.get("kind", 0)))
 	for id in _enemy_nodes.keys():
 		if not alive.has(id):
 			_enemy_nodes[id].queue_free()

@@ -1,5 +1,5 @@
 extends RefCounted
-## 快照编解码测试（M4）：元数据 + 玩家(含武器)/敌人/掉落/弹丸四段 + 房间编解码 + u32 大 id 往返。
+## 快照编解码测试（M4）：元数据 + 玩家(含武器)/敌人(hp01)/掉落/弹丸四段 + 房间编解码 + u32 大 id 往返。
 
 const Harness := preload("res://tools/tests/harness.gd")
 const Protocol := preload("res://net/protocol.gd")
@@ -22,7 +22,7 @@ func run() -> int:
 		},
 	]
 	var enemies: Array = [
-		{"id": 7, "pos": Vector2(-3.5, 8.0), "hp": 200, "kind": 1},
+		{"id": 7, "pos": Vector2(-3.5, 8.0), "hp01": 255, "kind": 1},
 	]
 	var loot: Array = [
 		{"id": 9, "pos": Vector2(100.0, 50.0), "kind": 1},
@@ -52,7 +52,7 @@ func run() -> int:
 
 	t.eq(d["enemies"].size(), 1, "敌人数往返")
 	t.eq(d["enemies"][0]["id"], 7, "敌人 id 往返")
-	t.eq(d["enemies"][0]["hp"], 200, "敌人 hp 往返")
+	t.eq(d["enemies"][0]["hp01"], 255, "敌人 hp01 往返（u8 无溢出）")
 	t.eq(d["enemies"][0]["kind"], 1, "敌人 kind 往返")
 
 	t.eq(d["loot"].size(), 1, "掉落数往返")

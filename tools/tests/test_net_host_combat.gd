@@ -171,4 +171,24 @@ func run() -> int:
 	t.check(h14.players[1]["pos"].x <= limit, "玩家被墙挡住不再靠近")
 	t.check(h14.players[1]["pos"].x > 0.0, "玩家确实向右移动了一段")
 
+	# (15) 敌人血量归一化：满血 hp01 = 255，与波次放大解耦（第 3 波 Boss 绝对 260 > u8）
+	var h15 := NetHostLogic.new()
+	h15.reset()
+	h15.spawn_interval = 9999.0
+	h15.elapsed = Waves.WAVE_DURATION * 2.0 + 1.0
+	h15.physics_step(0.016)
+	var eid15 := h15.spawn_boss()
+	t.eq(int(h15.enemies[eid15]["hp"]), 260, "第 3 波 Boss 绝对血量 260（超出 u8 范围）")
+	var full15 := false
+	for s in h15.enemy_states():
+		if int(s["id"]) == eid15:
+			full15 = int(s["hp01"]) == 255
+	t.check(full15, "满血 Boss hp01 = 255")
+	h15.enemies[eid15]["hp"] = 130
+	var half15 := false
+	for s in h15.enemy_states():
+		if int(s["id"]) == eid15:
+			half15 = int(s["hp01"]) == 128
+	t.check(half15, "半血 Boss hp01 = 128（130/260）")
+
 	return t.report("NetHostCombat")

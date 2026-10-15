@@ -4,7 +4,7 @@ extends RefCounted
 ## 输入帧：5 字节。
 ## 快照头：u32 tick | u8 level | u16 xp | u16 kills | u8 pc | u8 ec | u8 lc | u8 prc = 13 字节
 ## 玩家段：u32 id | f32 x | f32 y | u8 hp | u8 status | u8 revive01 | u8 weapon = 16 字节
-## 敌人段：u32 id | f32 x | f32 y | u8 hp | u8 kind = 14 字节
+## 敌人段：u32 id | f32 x | f32 y | u8 hp01 | u8 kind = 14 字节
 ## 掉落段：u32 id | f32 x | f32 y | u8 kind = 13 字节
 ## 弹丸段：u32 id | f32 x | f32 y | i8 dirx | i8 diry | u8 kind = 15 字节
 ## 房间：u8 wc | wc*(f32 x | f32 y | f32 w | f32 h) = 1 + 16*wc 字节
@@ -53,7 +53,7 @@ static func decode_input(b: PackedByteArray) -> Dictionary:
 # ---------------- 快照 ----------------
 # 布局: u32 tick | u8 level | u16 xp | u16 kills | u8 pc
 #     | pc*(u32 id | f32 x | f32 y | u8 hp | u8 status | u8 revive01 | u8 weapon)
-#     | u8 ec | ec*(u32 id | f32 x | f32 y | u8 hp | u8 kind)
+#     | u8 ec | ec*(u32 id | f32 x | f32 y | u8 hp01 | u8 kind)
 #     | u8 lc | lc*(u32 id | f32 x | f32 y | u8 kind)
 #     | u8 prc | prc*(u32 id | f32 x | f32 y | i8 dx | i8 dy | u8 kind)
 # 注意：Godot 4 的对端 unique_id 为随机大整数（可达 2^31），实体 id 一律 u32。
@@ -90,7 +90,7 @@ static func encode_snapshot(
 		b.encode_u32(o, int(e["id"]))
 		b.encode_float(o + 4, float(e["pos"].x))
 		b.encode_float(o + 8, float(e["pos"].y))
-		b[o + 12] = int(e.get("hp", 0)) & 0xFF
+		b[o + 12] = int(e.get("hp01", 255)) & 0xFF
 		b[o + 13] = int(e.get("kind", 0)) & 0xFF
 		o += ENEMY_BYTES
 	b[o] = loot.size()
@@ -155,7 +155,7 @@ static func decode_snapshot(b: PackedByteArray) -> Dictionary:
 					{
 						"id": b.decode_u32(o),
 						"pos": Vector2(b.decode_float(o + 4), b.decode_float(o + 8)),
-						"hp": b[o + 12],
+						"hp01": b[o + 12],
 						"kind": b[o + 13],
 					}
 				)
