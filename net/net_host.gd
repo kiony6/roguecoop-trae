@@ -40,7 +40,7 @@ var _offer_sent := {}  # id -> bool，候选是否已下发
 var _rng := RandomNumberGenerator.new()
 
 
-func reset() -> void:
+func reset(dedicated: bool = false) -> void:
 	tick = 0
 	snapshot_count = 0
 	local_move = Vector2.ZERO
@@ -54,7 +54,7 @@ func reset() -> void:
 	run_over = false
 	won = false
 	boss_id = 0
-	players = {1: _new_player()}
+	players = {} if dedicated else {1: _new_player()}
 	enemies = {}
 	loot = {}
 	projectiles = {}
@@ -407,6 +407,8 @@ func _step_loot(delta: float) -> void:
 
 
 func _step_spawner(delta: float) -> void:
+	if players.is_empty():
+		return  # 专用服务器在无人接入前不刷怪，避免敌人空堆在原点
 	_spawn_accum += delta
 	if _spawn_accum >= spawn_interval and enemies.size() < Waves.max_enemies(wave):
 		_spawn_accum = 0.0

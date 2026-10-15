@@ -241,4 +241,25 @@ func run() -> int:
 	t.eq(h19.players[1]["status"], Combat.PLAYER_ALIVE, "队友存活时倒地者被救起")
 	t.check(not h19.run_over, "仍有存活玩家 → 不判负")
 
+	# (18) 专用模式：不播种本地玩家（id=1 不占位）
+	var h20 := NetHostLogic.new()
+	h20.reset(true)
+	h20.spawn_interval = 9999.0
+	t.eq(h20.peer_ids().size(), 0, "专用模式初始无玩家")
+	t.eq(h20.player_states().size(), 0, "专用模式 player_states 为空")
+	h20.add_player(2)
+	t.eq(h20.player_states().size(), 1, "接入客户端后才有玩家状态")
+	t.eq(int(h20.player_states()[0]["id"]), 2, "接入的玩家 id 生效")
+
+	# (19) 无玩家时不刷新敌人（避免专用服务器空转堆积到原点）
+	var h21 := NetHostLogic.new()
+	h21.reset(true)
+	for _i in range(600):
+		h21.physics_step(0.016)
+	t.eq(h21.enemies.size(), 0, "无玩家时不刷新敌人")
+	h21.add_player(2)
+	for _i in range(200):
+		h21.physics_step(0.016)
+	t.check(h21.enemies.size() > 0, "有玩家后恢复刷新敌人")
+
 	return t.report("NetHostCombat")
