@@ -1,5 +1,5 @@
 extends Node
-## M3 联机冒烟测试 —— 主机端。由 run_net_test.ps1 与客户端实例并行启动。
+## M3/M4 联机冒烟测试 —— 主机端。由 run_net_test.ps1 与客户端实例并行启动。
 
 const Protocol := preload("res://net/protocol.gd")
 
@@ -21,6 +21,9 @@ var _loot_picked := false
 var _level_seen := false
 var _level_seen_at := 0.0
 var _status_seen := false
+var _proj_seen := false
+var _room_ok := false
+var _wave_ok := false
 
 
 func _ready() -> void:
@@ -40,13 +43,22 @@ func _on_input(pid: int) -> void:
 		_remote_input = true
 
 
-func _on_state(_tick: int, meta: Dictionary, players: Array, enemies: Array, loot: Array) -> void:
+func _on_state(
+	_tick: int, meta: Dictionary, players: Array, enemies: Array, loot: Array, projectiles: Array
+) -> void:
 	if players.size() >= 2:
 		_saw_two = true
 	if int(meta.get("level", 1)) >= 2:
 		if not _level_seen:
 			_level_seen_at = _t
 		_level_seen = true
+	# M4：波次档位已推进到 >=1、程序化房间墙体已生成、快照含弹丸
+	if int(meta.get("wave", 0)) >= 1:
+		_wave_ok = true
+	if Net.room_walls().size() > 0:
+		_room_ok = true
+	if not projectiles.is_empty():
+		_proj_seen = true
 	for p in players:
 		if p.has("status"):
 			_status_seen = true
@@ -98,36 +110,39 @@ func _process(delta: float) -> void:
 		and combat_ok
 		and linger_ok
 		and _status_seen
+		and _proj_seen
+		and _room_ok
+		and _wave_ok
 		and _t > 4.0
 	):
 		print(
 			(
-				(
-					"[NetTest-Host] PASS remote_input=1 two_players=1 client_moved=1 host_moved=1 "
-					+ "enemy_seen=1 enemy_killed=1 loot_seen=1 loot_picked=%d level_seen=1 status_seen=1"
-				)
-				% (1 if _loot_picked else 0)
+				"[NetTest-Host] PASS remote_input=1 two_players=1 client_moved=1 host_moved=1 "
+				+ "enemy_seen=1 enemy_killed=1 loot_seen=1 loot_picked=%d level_seen=1 "
+				+ "status_seen=1 proj_seen=1 room_ok=1 wave_ok=1"
 			)
+			% (1 if _loot_picked else 0)
 		)
 		get_tree().quit(0)
 	elif _t > 25.0:
 		printerr(
 			(
-				(
-					"[NetTest-Host] FAIL timeout remote_input=%s two=%s cmoved=%s hmoved=%s "
-					+ "eseen=%s ekilled=%s lseen=%s level=%s status=%s"
-				)
-				% [
-					_remote_input,
-					_saw_two,
-					_client_moved,
-					_host_moved,
-					_enemy_seen,
-					_enemy_killed,
-					_loot_seen,
-					_level_seen,
-					_status_seen,
-				]
+				"[NetTest-Host] FAIL timeout remote_input=%s two=%s cmoved=%s hmoved=%s "
+				+ "eseen=%s ekilled=%s lseen=%s level=%s status=%s proj=%s room=%s wave=%s"
 			)
+			% [
+				_remote_input,
+				_saw_two,
+				_client_moved,
+				_host_moved,
+				_enemy_seen,
+				_enemy_killed,
+				_loot_seen,
+				_level_seen,
+				_status_seen,
+				_proj_seen,
+				_room_ok,
+				_wave_ok,
+			]
 		)
 		get_tree().quit(1)
