@@ -195,9 +195,7 @@ func run() -> int:
 	var h16 := NetHostLogic.new()
 	h16.reset()
 	h16.spawn_interval = 9999.0
-	h16.loot[1] = {
-		"pos": Vector2(3000, 3000), "kind": Combat.LOOT_KIND_XP, "ttl": Combat.LOOT_TTL
-	}
+	h16.loot[1] = {"pos": Vector2(3000, 3000), "kind": Combat.LOOT_KIND_XP, "ttl": Combat.LOOT_TTL}
 	t.eq(h16.loot.size(), 1, "掉落初始存在")
 	var steps := int(ceilf(Combat.LOOT_TTL / 0.016)) + 5
 	for _i in range(steps):
