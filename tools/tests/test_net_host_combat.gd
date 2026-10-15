@@ -191,4 +191,28 @@ func run() -> int:
 			half15 = int(s["hp01"]) == 128
 	t.check(half15, "半血 Boss hp01 = 128（130/260）")
 
+	# (16) 掉落生命周期：超出 TTL 未被拾取则自动消失（消除无界累积）
+	var h16 := NetHostLogic.new()
+	h16.reset()
+	h16.spawn_interval = 9999.0
+	h16.loot[1] = {
+		"pos": Vector2(3000, 3000), "kind": Combat.LOOT_KIND_XP, "ttl": Combat.LOOT_TTL
+	}
+	t.eq(h16.loot.size(), 1, "掉落初始存在")
+	var steps := int(ceilf(Combat.LOOT_TTL / 0.016)) + 5
+	for _i in range(steps):
+		h16.physics_step(0.016)
+	t.eq(h16.loot.size(), 0, "超过 TTL 的掉落被自动清除")
+
+	# (17) 掉落硬上限：满员时新增掉落淘汰最旧（id 最小者）
+	var h17 := NetHostLogic.new()
+	h17.reset()
+	h17.spawn_interval = 9999.0
+	for i in range(Combat.MAX_LOOT):
+		h17.loot[100 + i] = {"pos": Vector2(3000, 3000), "kind": Combat.LOOT_KIND_XP}
+	var eid17 := h17.spawn_enemy(Vector2(3000, 3000))
+	h17._kill_enemy(eid17)
+	t.eq(h17.loot.size(), Combat.MAX_LOOT, "掉落数被硬上限约束")
+	t.check(not h17.loot.has(100), "超限时淘汰最旧掉落")
+
 	return t.report("NetHostCombat")

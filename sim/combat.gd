@@ -20,6 +20,10 @@ const SPAWN_INTERVAL := 1.5
 const SPAWN_RADIUS := 420.0
 const MAX_ENEMIES := 24
 
+# —— M4.1：掉落有界化（防止无上限累积拖垮主机） ——
+const LOOT_TTL := 12.0  # 掉落自生成起的存活秒数，到期未被拾取即消失
+const MAX_LOOT := 200  # 全场掉落硬上限，超限先淘汰最旧的
+
 # —— M3：敌人种类与 Boss ——
 const ENEMY_KIND_NORMAL := 0
 const ENEMY_KIND_BOSS := 1

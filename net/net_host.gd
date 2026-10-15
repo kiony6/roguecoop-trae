@@ -368,9 +368,14 @@ func _step_downed(delta: float) -> void:
 
 
 func _step_loot(delta: float) -> void:
-	var picked: Array = []
+	var removed: Array = []
 	for lid in loot:
 		var l: Dictionary = loot[lid]
+		var ttl := float(l.get("ttl", Combat.LOOT_TTL)) - delta
+		if ttl <= 0.0:
+			removed.append(lid)
+			continue
+		l["ttl"] = ttl
 		var owner := _nearest_alive_player_id(l["pos"])
 		if owner == 0:
 			continue
@@ -385,10 +390,10 @@ func _step_loot(delta: float) -> void:
 			var heal := int(p["mods"]["heal_add"])
 			if heal > 0:
 				p["hp"] = mini(p["hp"] + heal, Progression.max_hp(p["mods"]))
-			picked.append(lid)
+			removed.append(lid)
 		elif d <= magnet_r:
 			l["pos"] = l["pos"] + to_player.normalized() * Combat.LOOT_MAGNET_SPEED * delta
-	for lid in picked:
+	for lid in removed:
 		loot.erase(lid)
 
 
@@ -445,9 +450,18 @@ func _kill_enemy(eid: int) -> void:
 		boss_id = 0
 		boss_kills += 1
 	kills += 1
-	var lid := _alloc_id()
 	var loot_kind := Combat.LOOT_KIND_BIG if kind == Combat.ENEMY_KIND_BOSS else Combat.LOOT_KIND_XP
-	loot[lid] = {"pos": pos, "kind": loot_kind}
+	_add_loot(pos, loot_kind)
+
+
+func _add_loot(pos: Vector2, kind: int) -> void:
+	## 有界掉落：先按硬上限淘汰最旧（实体 id 单调递增 → 最小 id 即最旧），再带 TTL 入池。
+	while loot.size() >= Combat.MAX_LOOT:
+		var keys := loot.keys()
+		keys.sort()
+		loot.erase(int(keys[0]))
+	var lid := _alloc_id()
+	loot[lid] = {"pos": pos, "kind": kind, "ttl": Combat.LOOT_TTL}
 
 
 func _check_run_over() -> void:
