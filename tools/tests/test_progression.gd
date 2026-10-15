@@ -50,4 +50,11 @@ func run() -> int:
 
 	t.check(Progression.card_by_id(999).is_empty(), "未知卡 id 返回空字典")
 
+	# —— M4：换装卡（weapon_set）不改变修饰字典，由主机单独读取 ——
+	t.check(Progression.card_by_id(6).has("weapon_set"), "换装卡带 weapon_set")
+	t.eq(Progression.card_by_id(6)["weapon_set"], 1, "换装卡 6 → 步枪 id 1")
+	t.eq(Progression.card_by_id(7)["weapon_set"], 2, "换装卡 7 → 霰弹枪 id 2")
+	var mw := Progression.apply_card(Progression.default_modifiers(), Progression.card_by_id(6))
+	t.eq(mw, Progression.default_modifiers(), "换装卡不改变修饰字典")
+
 	return t.report("Progression")

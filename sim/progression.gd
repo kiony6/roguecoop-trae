@@ -13,6 +13,8 @@ const CARDS: Array = [
 	{"id": 3, "name": "磁力", "pickup_add": 30},
 	{"id": 4, "name": "散射", "extra_projectiles": 1},
 	{"id": 5, "name": "回春", "heal_add": 3},
+	{"id": 6, "name": "换装·步枪", "weapon_set": 1},
+	{"id": 7, "name": "换装·霰弹枪", "weapon_set": 2},
 ]
 
 
@@ -43,7 +45,7 @@ static func apply_card(mods: Dictionary, card: Dictionary) -> Dictionary:
 	## 纯函数：返回叠加后的新修饰字典，不修改入参。
 	var out := mods.duplicate()
 	for k in card.keys():
-		if k == "id" or k == "name":
+		if k == "id" or k == "name" or k == "weapon_set":
 			continue
 		if k == "cooldown_scale":
 			out["cooldown_scale"] = float(out.get("cooldown_scale", 1.0)) * float(card[k])
