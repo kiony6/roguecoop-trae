@@ -1,3 +1,5 @@
+param([int]$Latency = 0)
+
 $ErrorActionPreference = "Stop"
 
 $godot = "D:\Godot\Godot_v4.7.2-stable_win64_console.exe"
@@ -12,14 +14,17 @@ $hostErr = Join-Path $out "host.err"
 $cliOut  = Join-Path $out "client.log"
 $cliErr  = Join-Path $out "client.err"
 
+$extra = @()
+if ($Latency -gt 0) { $extra = @("--", "--latency=$Latency") }
+
 $hostProc = Start-Process -FilePath $godot -PassThru -NoNewWindow `
-    -ArgumentList @("--headless", "--path", $proj, "res://tools/net_test/net_test_host.tscn") `
+    -ArgumentList (@("--headless", "--path", $proj, "res://tools/net_test/net_test_host.tscn") + $extra) `
     -RedirectStandardOutput $hostOut -RedirectStandardError $hostErr
 
 Start-Sleep -Milliseconds 1500
 
 $client = Start-Process -FilePath $godot -PassThru -NoNewWindow `
-    -ArgumentList @("--headless", "--path", $proj, "res://tools/net_test/net_test_client.tscn") `
+    -ArgumentList (@("--headless", "--path", $proj, "res://tools/net_test/net_test_client.tscn") + $extra) `
     -RedirectStandardOutput $cliOut -RedirectStandardError $cliErr
 
 $client.WaitForExit(40000) | Out-Null

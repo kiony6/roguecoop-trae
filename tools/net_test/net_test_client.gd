@@ -24,6 +24,9 @@ var _status_seen := false
 var _proj_seen := false
 var _room_ok := false
 var _ip := "127.0.0.1"
+var _port := Protocol.DEFAULT_PORT
+var _solo := false
+var _no_phantom := true
 var _self_pos := Vector2.ZERO
 var _have_self := false
 var _nearest_enemy := INF
@@ -33,12 +36,18 @@ func _ready() -> void:
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--ip="):
 			_ip = a.substr(5)
+		elif a.begins_with("--port="):
+			_port = int(a.substr(7))
+		elif a.begins_with("--latency="):
+			Net.set_debug_latency_ms(int(a.substr(10)))
+		elif a.begins_with("--solo="):
+			_solo = int(a.substr(7)) != 0
 
 	Net.connected_ok.connect(_on_connected)
 	Net.connection_failed.connect(_on_failed)
 	Net.world_state.connect(_on_state)
 
-	var err := Net.client_connect(_ip, Protocol.DEFAULT_PORT)
+	var err := Net.client_connect(_ip, _port)
 	if err != OK:
 		printerr("[NetTest-Client] FAIL connect err=%d" % err)
 		get_tree().quit(1)
@@ -68,6 +77,7 @@ func _on_state(
 	_snapshots += 1
 	if players.size() >= 2:
 		_saw_two = true
+		_no_phantom = false  # 专用模式下若仍有第二个玩家 = 幽灵玩家仍在
 	if int(meta.get("level", 1)) >= 2:
 		_level_seen = true
 	# M4：客户端收到含弹丸的快照，且已收到主机可靠下发的房间（_rpc_room）
@@ -101,26 +111,50 @@ func _on_state(
 
 func _process(delta: float) -> void:
 	_t += delta
-	if (
-		_connected
-		and _snapshots >= 10
-		and _saw_two
-		and _self_seen
-		and _self_moved
-		and _enemy_seen
-		and _loot_seen
-		and _level_seen
-		and _status_seen
-		and _proj_seen
-		and _room_ok
-	):
+	var ok := false
+	if _solo:
+		ok = (
+			_connected
+			and _snapshots >= 10
+			and _self_seen
+			and _self_moved
+			and _enemy_seen
+			and _loot_seen
+			and _no_phantom
+		)
+	else:
+		ok = (
+			_connected
+			and _snapshots >= 10
+			and _saw_two
+			and _self_seen
+			and _self_moved
+			and _enemy_seen
+			and _loot_seen
+			and _level_seen
+			and _status_seen
+			and _proj_seen
+			and _room_ok
+		)
+	if ok:
 		print(
 			(
 				(
-					"[NetTest-Client] PASS local_id=%d snapshots=%d two_players=1 moved=1 "
-					+ "enemy_seen=1 loot_seen=1 level_seen=1 status_seen=1 proj_seen=1 room_ok=1"
+					"[NetTest-Client] PASS local_id=%d snapshots=%d two_players=%d moved=1 "
+					+ "enemy_seen=1 loot_seen=1 level_seen=%d status_seen=%d proj_seen=%d "
+					+ "room_ok=%d solo=%d phantom_free=%d"
 				)
-				% [Net.local_id, _snapshots]
+				% [
+					Net.local_id,
+					_snapshots,
+					1 if _saw_two else 0,
+					1 if _level_seen else 0,
+					1 if _status_seen else 0,
+					1 if _proj_seen else 0,
+					1 if _room_ok else 0,
+					1 if _solo else 0,
+					1 if _no_phantom else 0,
+				]
 			)
 		)
 		get_tree().quit(0)
@@ -129,7 +163,7 @@ func _process(delta: float) -> void:
 			(
 				(
 					"[NetTest-Client] FAIL timeout connected=%s snapshots=%d two=%s self=%s "
-					+ "moved=%s eseen=%s lseen=%s level=%s status=%s proj=%s room=%s"
+					+ "moved=%s eseen=%s lseen=%s level=%s status=%s proj=%s room=%s solo=%s phantom=%s"
 				)
 				% [
 					_connected,
@@ -143,6 +177,8 @@ func _process(delta: float) -> void:
 					_status_seen,
 					_proj_seen,
 					_room_ok,
+					_solo,
+					_no_phantom,
 				]
 			)
 		)
