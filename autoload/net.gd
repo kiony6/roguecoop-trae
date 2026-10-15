@@ -182,7 +182,7 @@ func _physics_process(delta: float) -> void:
 		)
 		if not _host.run_over:
 			_offer_to_players()
-			_check_run_over()
+		_check_run_over()
 		_snap_accum += delta
 		if _snap_accum >= 1.0 / float(Protocol.SNAPSHOT_RATE):
 			_snap_accum = 0.0
