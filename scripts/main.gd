@@ -1,7 +1,10 @@
 extends Control
 ## 主菜单：建立主机 / 加入主机（支持 --ip= / --port= / --transport= 命令行预填）。
+## --auto=join 时免点击直接加入，供非 headless 双窗口画面验收用。
 
 const Protocol := preload("res://net/protocol.gd")
+
+var _auto_join := false
 
 @onready var _ip: LineEdit = $Panel/IpField
 @onready var _port: LineEdit = $Panel/PortField
@@ -25,6 +28,10 @@ func _ready() -> void:
 			_port.text = a.substr(7)
 		elif a.begins_with("--transport="):
 			_transport.selected = 1 if a.substr(12) == "ws" else 0
+		elif a.begins_with("--auto="):
+			_auto_join = a.substr(7) == "join"
+	if _auto_join:
+		_on_join_pressed.call_deferred()
 
 
 func _on_host_pressed() -> void:
