@@ -28,6 +28,7 @@ var mode: Mode = Mode.NONE
 var local_id := 0
 var dedicated := false
 var debug_latency_ms := 0  # 调试用单程人为延迟（毫秒），0 = 关闭；RTT ≈ 2×该值
+var transport_ws := false  # true = TCP/WebSocket，false = UDP/ENet（默认）
 
 var _host := NetHostLogic.new()
 var _client := NetClientLogic.new()
@@ -67,6 +68,16 @@ func interp_delay_ms() -> float:
 	return 100.0 if debug_latency_ms <= 0 else float(debug_latency_ms) + 100.0
 
 
+func set_websocket(enabled: bool) -> void:
+	## 切换传输层：true = TCP（WebSocket，适配只开放 TCP 的托管环境），false = UDP（ENet，默认）。
+	transport_ws = enabled
+
+
+func ws_url(address: String, port: int) -> String:
+	## WebSocket 客户端地址：create_client 需要带 scheme 的完整 URL。
+	return "ws://%s:%d" % [address, port]
+
+
 func is_run_over() -> bool:
 	## M4.5：本局是否已结束（主机取权威状态，客户端取结算 RPC 落下的标记）。
 	if mode == Mode.HOST:
@@ -90,10 +101,19 @@ func room_walls() -> Array:
 func host_start(port: int, as_dedicated: bool = false, bind_ip: String = "") -> Error:
 	if mode != Mode.NONE:
 		return ERR_ALREADY_IN_USE
-	var peer := ENetMultiplayerPeer.new()
-	if not bind_ip.is_empty():
-		peer.set_bind_ip(bind_ip)
-	var err := peer.create_server(port, Protocol.MAX_PLAYERS - 1, 2)
+	var peer: MultiplayerPeer = null
+	var err := OK
+	if transport_ws:
+		# WS 没有 set_bind_ip：绑定地址只能通过 create_server 的第二参传入，"*" = 全部接口
+		var ws := WebSocketMultiplayerPeer.new()
+		err = ws.create_server(port, "*" if bind_ip.is_empty() else bind_ip)
+		peer = ws
+	else:
+		var enet := ENetMultiplayerPeer.new()
+		if not bind_ip.is_empty():
+			enet.set_bind_ip(bind_ip)
+		err = enet.create_server(port, Protocol.MAX_PLAYERS - 1, 2)
+		peer = enet
 	if err != OK:
 		return err
 	multiplayer.multiplayer_peer = peer
@@ -133,8 +153,16 @@ func host_stop() -> void:
 func client_connect(address: String, port: int) -> Error:
 	if mode != Mode.NONE:
 		return ERR_ALREADY_IN_USE
-	var peer := ENetMultiplayerPeer.new()
-	var err := peer.create_client(address, port)
+	var peer: MultiplayerPeer = null
+	var err := OK
+	if transport_ws:
+		var ws := WebSocketMultiplayerPeer.new()
+		err = ws.create_client(ws_url(address, port))
+		peer = ws
+	else:
+		var enet := ENetMultiplayerPeer.new()
+		err = enet.create_client(address, port)
+		peer = enet
 	if err != OK:
 		return err
 	multiplayer.multiplayer_peer = peer
