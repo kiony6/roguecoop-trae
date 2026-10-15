@@ -35,6 +35,7 @@ func _physics_process(_delta: float) -> void:
 	if not _has_auth:
 		return
 	if Net.is_client():
+		_interp.delay_ms = Net.interp_delay_ms()
 		position = _interp.sample(float(Time.get_ticks_msec()))
 	else:
 		position = _auth

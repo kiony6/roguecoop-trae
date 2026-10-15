@@ -1,9 +1,9 @@
 extends RefCounted
-## 远端玩家插值器。按到达时间缓存采样点，回放 (now - DELAY_MS) 时刻的位置，
+## 远端玩家插值器。按到达时间缓存采样点，回放 (now - delay_ms) 时刻的位置，
 ## 从而把网络抖动从视觉上抹平。
 
-const DELAY_MS := 100.0
 const MAX_SAMPLES := 32
+var delay_ms := 100.0  # 回放延迟（毫秒）：默认 100，广域网下由表现层按 Net.interp_delay_ms() 抬升
 
 var _times: Array[float] = []
 var _points: Array[Vector2] = []
@@ -28,7 +28,7 @@ func sample(now_ms: float) -> Vector2:
 	if n == 1:
 		return _points[0]
 
-	var target := now_ms - DELAY_MS
+	var target := now_ms - delay_ms
 	if target <= _times[0]:
 		return _points[0]
 	if target >= _times[n - 1]:

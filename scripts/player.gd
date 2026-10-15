@@ -64,6 +64,7 @@ func _physics_process(delta: float) -> void:
 	if is_local and Net.is_client():
 		_local_tick(delta)
 	elif Net.is_client():
+		_interp.delay_ms = Net.interp_delay_ms()
 		position = _interp.sample(float(Time.get_ticks_msec()))
 	else:
 		position = _auth

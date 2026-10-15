@@ -20,6 +20,10 @@ text = "RogueCoop · 肉鸽多人联机"
 text = "127.0.0.1"
 placeholder_text = "主机 IP"
 
+[node name="PortField" type="LineEdit" parent="Panel"]
+text = "25600"
+placeholder_text = "端口（UDP）"
+
 [node name="HostButton" type="Button" parent="Panel"]
 text = "建立主机"
 

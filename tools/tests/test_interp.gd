@@ -32,4 +32,13 @@ func run() -> int:
 		it.push(Vector2(float(i), 0.0), float(i))
 	t.eq(it.sample_count(), Interp.MAX_SAMPLES, "采样数被裁剪到 MAX_SAMPLES")
 
+	# delay_ms 由常量改为实例字段：表现层可在高延迟下抬升回放延迟
+	var it2 := Interp.new()
+	it2.delay_ms = 200.0
+	it2.push(Vector2(0, 0), 0.0)
+	it2.push(Vector2(100, 0), 200.0)
+	var mid2 := it2.sample(200.0)
+	t.check(absf(mid2.x) < 0.001, "delay_ms=200 时目标时刻回退到首个采样")
+	t.check(absf(it2.delay_ms - 200.0) < 0.001, "delay_ms 可被外部覆盖")
+
 	return t.report("Interp")
