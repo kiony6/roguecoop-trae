@@ -53,6 +53,15 @@ func is_client() -> bool:
 	return mode == Mode.CLIENT
 
 
+func is_run_over() -> bool:
+	## M4.5：本局是否已结束（主机取权威状态，客户端取结算 RPC 落下的标记）。
+	if mode == Mode.HOST:
+		return _host.run_over
+	if mode == Mode.CLIENT:
+		return _client.run_over
+	return false
+
+
 func room_walls() -> Array:
 	if mode == Mode.HOST:
 		return _host.room_walls
@@ -187,7 +196,7 @@ func _physics_process(delta: float) -> void:
 		if _snap_accum >= 1.0 / float(Protocol.SNAPSHOT_RATE):
 			_snap_accum = 0.0
 			_send_snapshots()
-	elif mode == Mode.CLIENT and local_id != 0:
+	elif mode == Mode.CLIENT and local_id != 0 and not _client.run_over:
 		_send_accum += delta
 		if _send_accum >= 1.0 / float(Protocol.INPUT_RATE):
 			_send_accum = 0.0
@@ -375,6 +384,11 @@ func _rpc_upgrade_pick(card_id: int) -> void:
 func _rpc_run_over(won: bool, kills: int, level: int, boss_kills: int, seconds: float) -> void:
 	if mode != Mode.CLIENT:
 		return
+	# M4.5：客户端同步进入结算态——冻结本地预测并停止上报输入，
+	# 避免客户端继续预测、被冻结的权威位置反复拽回而在胜利后抽搐。
+	_client.run_over = true
+	_client.pending_move = Vector2.ZERO
+	_client.pending_buttons = 0
 	run_over.emit(
 		won, {"kills": kills, "level": level, "boss_kills": boss_kills, "seconds": seconds}
 	)

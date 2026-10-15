@@ -56,8 +56,10 @@ func push_authoritative(
 func _physics_process(delta: float) -> void:
 	if not _has_auth:
 		return
-	if status != Combat.PLAYER_ALIVE:
-		position = _auth  # 倒地/阵亡：不再预测，直接贴权威位置
+	# 倒地/阵亡、或本局已结算：不再预测，直接贴权威位置
+	# （M4.5：结算后若继续预测，客户端会与冻结的权威位置互相拉扯，表现为抽搐）
+	if status != Combat.PLAYER_ALIVE or Net.is_run_over():
+		position = _auth
 		return
 	if is_local and Net.is_client():
 		_local_tick(delta)
