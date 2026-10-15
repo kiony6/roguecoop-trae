@@ -215,10 +215,14 @@ func _on_run_over(won: bool, stats: Dictionary) -> void:
 	if _upgrade_menu != null:
 		_upgrade_menu.visible = false
 	if _runover_menu != null:
-		_runover_menu.show_result(won, stats)
+		_runover_menu.show_result(won, stats, "返回房间" if Lobby.in_room() else "返回主菜单")
 
 
 func _on_back_requested() -> void:
+	# 经大厅的房间：结算后回房间页等待房主再来一局，不拆 peer 连接
+	if Lobby.in_room():
+		get_tree().change_scene_to_file("res://scenes/ui/room.tscn")
+		return
 	if Net.is_client():
 		Net.client_disconnect()
 	elif Net.is_host():

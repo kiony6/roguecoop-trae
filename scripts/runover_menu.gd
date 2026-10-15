@@ -10,7 +10,7 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
 
 
-func show_result(won: bool, stats: Dictionary) -> void:
+func show_result(won: bool, stats: Dictionary, back_label := "返回主菜单") -> void:
 	for c in get_children():
 		c.queue_free()
 	visible = true
@@ -43,7 +43,7 @@ func show_result(won: bool, stats: Dictionary) -> void:
 	box.add_child(info)
 
 	var btn := Button.new()
-	btn.text = "返回主菜单"
+	btn.text = back_label
 	btn.custom_minimum_size = Vector2(220.0, 40.0)
 	btn.pressed.connect(func() -> void: back_requested.emit())
 	box.add_child(btn)

@@ -15,6 +15,18 @@ offset_bottom = 44.0
 theme_type_variation = &"TextButton"
 text = "← 返回主菜单"
 
+[node name="Badge" type="Label" parent="."]
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -280.0
+offset_top = 12.0
+offset_right = -16.0
+offset_bottom = 44.0
+grow_horizontal = 0
+theme_type_variation = &"Caption"
+horizontal_alignment = 2
+vertical_alignment = 1
+
 [node name="Center" type="CenterContainer" parent="."]
 anchor_right = 1.0
 anchor_bottom = 1.0
@@ -57,7 +69,11 @@ text = "加入"
 theme_type_variation = &"TextButton"
 text = "退出登录"
 
+[node name="Status" type="Label" parent="Center/Card/Box"]
+theme_type_variation = &"Caption"
+horizontal_alignment = 1
+
 [node name="Footnote" type="Label" parent="Center/Card/Box"]
 theme_type_variation = &"Caption"
-text = "占位页：真实功能见子项目 3"
+text = "创建房间会生成 6 位组队码，把它发给队友即可"
 horizontal_alignment = 1

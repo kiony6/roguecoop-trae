@@ -45,14 +45,16 @@ var _dedicated := false
 var _idle_seconds := 0.0
 
 
-func reset(dedicated: bool = false) -> void:
+func reset(dedicated: bool = false, seed_value: int = 20261015) -> void:
+	## dedicated=true 时不预置本地玩家（专服）；seed_value 决定地图与 RNG 种子，
+	## 默认值 20261015 保证既有 HOST / game 模式行为逐位不变，SERVER 每房传独立随机种子。
 	tick = 0
 	snapshot_count = 0
 	local_move = Vector2.ZERO
 	local_buttons = 0
 	spawn_interval = Waves.spawn_interval(1)
 	wave = 1
-	room_walls = Rooms.generate(20261015)
+	room_walls = Rooms.generate(seed_value)
 	kills = 0
 	boss_kills = 0
 	elapsed = 0.0
@@ -68,7 +70,7 @@ func reset(dedicated: bool = false) -> void:
 	_next_boss_at = Combat.BOSS_EVERY_KILLS
 	_offer = {}
 	_offer_sent = {}
-	_rng.seed = 20261015
+	_rng.seed = seed_value
 	_dedicated = dedicated
 	_idle_seconds = 0.0
 

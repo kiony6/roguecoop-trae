@@ -82,6 +82,7 @@ func disconnect_lobby() -> void:
 	lobby_open = false
 	username = ""
 	_password = ""
+	Lobby.reset()
 
 
 func is_logged_in() -> bool:

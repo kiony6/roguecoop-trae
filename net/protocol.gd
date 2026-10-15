@@ -10,7 +10,7 @@ extends RefCounted
 ## 房间：u8 wc | wc*(f32 x | f32 y | f32 w | f32 h) = 1 + 16*wc 字节
 ## 注意：ec/lc/prc 三个计数字节在布局上位于各自段之前（ec 紧接玩家段之后）。
 
-const PROTOCOL_VERSION := 3
+const PROTOCOL_VERSION := 4
 const DEFAULT_PORT := 25600
 const MAX_PLAYERS := 4  # 协议上限（实际按 2 人验收）
 const INPUT_RATE := 30  # 客户端输入上报 Hz

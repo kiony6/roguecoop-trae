@@ -38,27 +38,21 @@ horizontal_alignment = 1
 
 [node name="Code" type="Label" parent="Center/Card/Box"]
 theme_type_variation = &"Code"
-text = "204815"
 horizontal_alignment = 1
 
 [node name="Members" type="VBoxContainer" parent="Center/Card/Box"]
 theme_override_constants/separation = 4
 
-[node name="Host" type="Label" parent="Center/Card/Box/Members"]
-text = "房主 · 你"
-
-[node name="Peer" type="Label" parent="Center/Card/Box/Members"]
-theme_type_variation = &"Caption"
-text = "队友 · 等待加入…"
-
 [node name="StartButton" type="Button" parent="Center/Card/Box"]
 custom_minimum_size = Vector2(0, 56)
 theme_type_variation = &"PrimaryButton"
-disabled = true
-tooltip_text = "大厅与组队码见子项目 3"
-text = "开始（需 2 人）"
+text = "开始（1 人）"
+
+[node name="TickHint" type="Label" parent="Center/Card/Box"]
+theme_type_variation = &"Caption"
+horizontal_alignment = 1
 
 [node name="Footnote" type="Label" parent="Center/Card/Box"]
 theme_type_variation = &"Caption"
-text = "占位页：真实功能见子项目 3"
+text = "房主开局后全员进入同一张地图；结算后可返回此房间再来一局"
 horizontal_alignment = 1

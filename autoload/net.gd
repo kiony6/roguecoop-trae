@@ -24,14 +24,19 @@ signal auth_result(ok: bool, username: String, err_code: int)
 signal account_registered(ok: bool, err_code: int)
 signal account_session_closed
 signal version_mismatch(server_version: int)
+signal room_state(code: String, is_host: bool, state: int, members: PackedStringArray)
+signal room_error(err: int)
+signal lobby_event(event: String, code: String, peer: int)
 
-enum Mode { NONE, HOST, CLIENT }
+enum Mode { NONE, HOST, CLIENT, SERVER }
 
 const Protocol := preload("res://net/protocol.gd")
 const NetHostLogic := preload("res://net/net_host.gd")
 const NetClientLogic := preload("res://net/net_client.gd")
 const AoI := preload("res://net/aoi.gd")
 const AccountLib := preload("res://net/account.gd")
+const LobbyLib := preload("res://net/lobby.gd")
+const LobbyServer := preload("res://net/lobby_server.gd")
 
 const HANDSHAKE_TIMEOUT_MS := 5000  # 连接期 declare / hello 未到达的容忍窗口
 
@@ -56,6 +61,7 @@ var _account_server = null  # 账号服务实例（HOST 且启用账号时非空
 var _declared: Dictionary = {}  # 服务端：peer -> {"version": int, "role": int}
 var _handshake_deadlines: Dictionary = {}  # 服务端：peer -> declare 截止毫秒
 var _hello_deadline := -1  # 客户端：等 hello 的截止毫秒
+var _lobby = null  # SERVER 模式：房间表 + peer→房间 路由（由 server_start 创建）
 
 
 func _ready() -> void:
@@ -74,6 +80,20 @@ func is_host() -> bool:
 
 func is_client() -> bool:
 	return mode == Mode.CLIENT
+
+
+func is_server() -> bool:
+	return mode == Mode.SERVER
+
+
+func lobby_room_count() -> int:
+	## SERVER 模式当前存活房间数（供运维日志）；非 SERVER 返回 0。
+	return 0 if _lobby == null else int(_lobby.room_count())
+
+
+func _is_host_like() -> bool:
+	## HOST 与 SERVER 都是「服务端」，共享握手 / 账号 / 声明 RPC 的受理路径。
+	return mode == Mode.HOST or mode == Mode.SERVER
 
 
 func set_debug_latency_ms(ms: int) -> void:
@@ -137,6 +157,26 @@ func send_logout() -> void:
 		_rpc_logout.rpc_id(1)
 
 
+func send_room_create() -> void:
+	if mode == Mode.CLIENT:
+		_rpc_room_create.rpc_id(1)
+
+
+func send_room_join(code: String) -> void:
+	if mode == Mode.CLIENT:
+		_rpc_room_join.rpc_id(1, code)
+
+
+func send_room_leave() -> void:
+	if mode == Mode.CLIENT:
+		_rpc_room_leave.rpc_id(1)
+
+
+func send_room_start() -> void:
+	if mode == Mode.CLIENT:
+		_rpc_room_start.rpc_id(1)
+
+
 func is_run_over() -> bool:
 	## M4.5：本局是否已结束（主机取权威状态，客户端取结算 RPC 落下的标记）。
 	if mode == Mode.HOST:
@@ -192,6 +232,43 @@ func host_start(port: int, as_dedicated: bool = false, bind_ip: String = "") -> 
 	set_physics_process(true)
 	if not as_dedicated:
 		player_joined.emit(1)
+	return OK
+
+
+func server_start(port: int, bind_ip: String = "") -> Error:
+	## 大厅专服：单进程多房间（M6.3）。与 host_start 的区别是客户端上限按 ROOMS_CAPACITY（16）
+	## 且不预置本地玩家；房间表与 peer→房间 路由交给 LobbyServer。
+	if mode != Mode.NONE:
+		return ERR_ALREADY_IN_USE
+	var peer: MultiplayerPeer = null
+	var err := OK
+	if transport_ws:
+		var ws := WebSocketMultiplayerPeer.new()
+		err = ws.create_server(port, "*" if bind_ip.is_empty() else bind_ip)
+		peer = ws
+	else:
+		var enet := ENetMultiplayerPeer.new()
+		if not bind_ip.is_empty():
+			enet.set_bind_ip(bind_ip)
+		err = enet.create_server(port, LobbyLib.ROOMS_CAPACITY, 2)
+		peer = enet
+	if err != OK:
+		return err
+	multiplayer.multiplayer_peer = peer
+	dedicated = true
+	_lobby = LobbyServer.new(_account_server)
+	_known_peers.clear()
+	_run_over_sent = false
+	_idle_resets_seen = 0
+	_declared.clear()
+	_handshake_deadlines.clear()
+	_input_queue.clear()
+	_snap_queue.clear()
+	mode = Mode.SERVER
+	local_id = 0
+	_send_accum = 0.0
+	_snap_accum = 0.0
+	set_physics_process(true)
 	return OK
 
 
@@ -321,6 +398,18 @@ func _physics_process(delta: float) -> void:
 		if _snap_accum >= 1.0 / float(Protocol.SNAPSHOT_RATE):
 			_snap_accum = 0.0
 			_send_snapshots()
+	elif mode == Mode.SERVER:
+		# 大厅专服：一条 peer 连接按 peer→房间 路由输入/快照/升级/结算，逐房驱动
+		_check_handshakes()
+		_drain_input_queue()
+		if _lobby != null:
+			_lobby.step(delta)
+			_offer_to_rooms()
+			_check_rooms_run_over()
+			_snap_accum += delta
+			if _snap_accum >= 1.0 / float(Protocol.SNAPSHOT_RATE):
+				_snap_accum = 0.0
+				_send_room_snapshots()
 	elif mode == Mode.CLIENT:
 		_check_hello()
 		_drain_snap_queue()
@@ -349,6 +438,19 @@ func _offer_to_players() -> void:
 			upgrade_offer.emit(packed)
 		else:
 			_rpc_upgrade_offer.rpc_id(peer, packed)
+
+
+func _offer_to_rooms() -> void:
+	## SERVER：逐房下发升级候选（每房独立 NetHostLogic）。
+	for code in _lobby.running_rooms():
+		var logic = _lobby.logic_of(String(code))
+		if logic == null:
+			continue
+		for peer in logic.peer_ids():
+			var choices: Array = logic.pending_offer(peer)
+			if choices.is_empty():
+				continue
+			_rpc_upgrade_offer.rpc_id(peer, PackedInt32Array(choices))
 
 
 func _announce_idle_reset() -> void:
@@ -383,6 +485,43 @@ func _check_run_over() -> void:
 			)
 
 
+func _check_rooms_run_over() -> void:
+	for code in _lobby.running_rooms():
+		_check_room_run_over(String(code))
+
+
+func _check_room_run_over(code: String) -> void:
+	var logic = _lobby.logic_of(code)
+	if logic == null or not logic.run_over:
+		return
+	var ids: PackedInt32Array = logic.peer_ids()
+	var sample := 0 if ids.is_empty() else int(ids[0])
+	var sample_stats: Dictionary = logic.stats(sample) if logic.has_player(sample) else {}
+	run_over.emit(logic.won, sample_stats)
+	for peer in ids:
+		var stats: Dictionary = logic.stats(peer)
+		_rpc_run_over.rpc_id(
+			peer,
+			logic.won,
+			int(stats["kills"]),
+			int(stats["level"]),
+			int(stats["boss_kills"]),
+			float(stats["seconds"])
+		)
+	# 结算不拆连接：房间回 WAITING、保留成员、换新地图，房主可再开一局（根治 F11）
+	var members: PackedInt32Array = _lobby.members_of(code)
+	_lobby.finish_run(code)
+	for peer in members:
+		_rpc_room_state.rpc_id(
+			int(peer),
+			code,
+			_lobby.is_host(int(peer)),
+			LobbyLib.STATE.WAITING,
+			_lobby.names_of(code)
+		)
+	lobby_event.emit("finished", code, sample)
+
+
 func _send_snapshots() -> void:
 	var players := _host.player_states()
 	var enemies := _host.enemy_states()
@@ -405,6 +544,35 @@ func _send_snapshots() -> void:
 	_host.snapshot_count += 1
 
 
+func _send_room_snapshots() -> void:
+	for code in _lobby.running_rooms():
+		_send_room_snapshot(String(code))
+
+
+func _send_room_snapshot(code: String) -> void:
+	## 逐房快照：AoI 中心与裁剪只在**本房成员**上计算，避免跨房玩家位置混入。
+	var logic = _lobby.logic_of(code)
+	if logic == null:
+		return
+	var players: Array = logic.player_states()
+	var enemies: Array = logic.enemy_states()
+	var loot: Array = logic.loot_states()
+	var projs_all: Array = logic.projectile_states()
+	for peer in logic.peer_ids():
+		if not logic.players.has(peer):
+			continue
+		var meta: Dictionary = logic.meta(peer)
+		var center: Vector2 = logic.players[peer]["pos"]
+		var culled_enemies := AoI.cull(center, AoI.AOI_RADIUS, enemies)
+		var culled_loot := AoI.cull(center, AoI.AOI_RADIUS, loot)
+		var culled_proj := AoI.cull(center, AoI.AOI_RADIUS, projs_all)
+		var payload := Protocol.encode_snapshot(
+			logic.tick, meta, players, culled_enemies, culled_loot, culled_proj
+		)
+		_rpc_snapshot.rpc_id(peer, logic.tick, payload)
+	logic.snapshot_count += 1
+
+
 func _drain_input_queue() -> void:
 	if _input_queue.is_empty():
 		return
@@ -412,7 +580,10 @@ func _drain_input_queue() -> void:
 	var keep: Array = []
 	for it in _input_queue:
 		if int(it["due"]) <= now:
-			_apply_remote_input(int(it["sender"]), it["payload"])
+			if mode == Mode.SERVER:
+				_apply_server_input(int(it["sender"]), it["payload"])
+			else:
+				_apply_remote_input(int(it["sender"]), it["payload"])
 		else:
 			keep.append(it)
 	_input_queue = keep
@@ -437,6 +608,21 @@ func _apply_remote_input(sender: int, payload: PackedByteArray) -> void:
 	input_received.emit(sender)
 
 
+func _apply_server_input(sender: int, payload: PackedByteArray) -> void:
+	## SERVER：输入按 peer→房间 分发；非本房成员一律丢弃。
+	if _lobby == null:
+		return
+	var code: String = _lobby.room_of(sender)
+	if code.is_empty():
+		return
+	var logic = _lobby.logic_of(code)
+	if logic == null:
+		return
+	var f := Protocol.decode_input(payload)
+	logic.set_remote_input(sender, f["move"], f["buttons"])
+	input_received.emit(sender)
+
+
 func _apply_snapshot(payload: PackedByteArray) -> void:
 	var snap := Protocol.decode_snapshot(payload)
 	_client.last_snapshot_tick = snap["tick"]
@@ -456,7 +642,7 @@ func _apply_snapshot(payload: PackedByteArray) -> void:
 
 
 func _on_peer_connected(id: int) -> void:
-	if mode != Mode.HOST:
+	if not _is_host_like():
 		return
 	# M6.2：不再「连接即入局」——先下发 hello，等客户端 declare 通过后再按角色放行
 	_rpc_hello.rpc_id(id, desired_version())
@@ -464,20 +650,48 @@ func _on_peer_connected(id: int) -> void:
 
 
 func _on_peer_disconnected(id: int) -> void:
-	if mode != Mode.HOST:
+	if not _is_host_like():
 		return
 	_handshake_deadlines.erase(id)
 	_declared.erase(id)
 	if _account_server != null:
 		_account_server.on_peer_left(id)
+	if mode == Mode.SERVER:
+		_handle_server_peer_left(id)
+		return
 	if _host.has_player(id):
 		_host.remove_player(id)
 		player_left.emit(id)
 		_broadcast_peer_list()
 
 
+func _handle_server_peer_left(id: int) -> void:
+	## SERVER：peer 离线 → 按 peer→房间 处理。房主离线立即销毁房间并通知其余成员；否则刷新成员列表。
+	if _lobby == null:
+		return
+	var ev: Dictionary = _lobby.on_peer_left(id)
+	var destroyed := String(ev["destroyed"])
+	var affected: PackedInt32Array = ev["affected"]
+	player_left.emit(id)
+	if destroyed.is_empty():
+		var code := ""
+		if not affected.is_empty():
+			code = String(_lobby.room_of(int(affected[0])))
+		if not code.is_empty():
+			_broadcast_room_state(code)
+		lobby_event.emit("left", code, id)
+		return
+	for peer in affected:
+		_rpc_room_error.rpc_id(int(peer), LobbyLib.ERR.ROOM_NOT_FOUND)
+		_rpc_room_state.rpc_id(int(peer), "", false, LobbyLib.STATE.WAITING, PackedStringArray())
+	lobby_event.emit("destroyed", destroyed, id)
+
+
 func _admit(id: int) -> void:
 	## declare 校验通过后按角色放行：ROLE_PLAYER 入局，ROLE_LOBBY 只占连接。
+	## SERVER（大厅）模式：declare 通过即占连接，等房间 RPC；不入任何房间、不下发墙体。
+	if mode == Mode.SERVER:
+		return
 	var info: Dictionary = _declared.get(id, {})
 	if int(info.get("role", Protocol.ROLE_PLAYER)) != Protocol.ROLE_PLAYER:
 		return
@@ -539,10 +753,26 @@ func _broadcast_peer_list() -> void:
 	_rpc_peer_list.rpc(_host.peer_ids())
 
 
+func _broadcast_room_state(code: String) -> void:
+	## SERVER：把房间快照下发给房内全部成员（成员列表用大厅用户名，房主首位）。
+	if _lobby == null or code.is_empty():
+		return
+	var members: PackedInt32Array = _lobby.members_of(code)
+	if members.is_empty():
+		return
+	var names: PackedStringArray = _lobby.names_of(code)
+	var state := int(_lobby.state_of(code))
+	for peer in members:
+		_rpc_room_state.rpc_id(int(peer), code, _lobby.is_host(int(peer)), state, names)
+
+
 # ---------------- RPC ----------------
 
 @rpc("any_peer", "call_remote", "unreliable_ordered", 1)
 func _rpc_input(_tick_in: int, payload: PackedByteArray) -> void:
+	if mode == Mode.SERVER:
+		_rpc_input_server(payload)
+		return
 	if mode != Mode.HOST:
 		return
 	var sender := multiplayer.get_remote_sender_id()
@@ -556,6 +786,18 @@ func _rpc_input(_tick_in: int, payload: PackedByteArray) -> void:
 		)
 		return
 	_apply_remote_input(sender, payload)
+
+
+func _rpc_input_server(payload: PackedByteArray) -> void:
+	var who := multiplayer.get_remote_sender_id()
+	if who == 0:
+		return
+	if debug_latency_ms > 0:
+		_input_queue.append(
+			{"due": Time.get_ticks_msec() + debug_latency_ms, "payload": payload, "sender": who}
+		)
+		return
+	_apply_server_input(who, payload)
 
 
 @rpc("authority", "call_remote", "unreliable_ordered", 1)
@@ -602,9 +844,21 @@ func _rpc_upgrade_offer(choices: PackedInt32Array) -> void:
 
 @rpc("any_peer", "call_remote", "reliable", 0)
 func _rpc_upgrade_pick(card_id: int) -> void:
+	var sender := multiplayer.get_remote_sender_id()
+	if mode == Mode.SERVER:
+		if sender == 0 or _lobby == null:
+			return
+		var code: String = _lobby.room_of(sender)
+		if code.is_empty():
+			return
+		var logic = _lobby.logic_of(code)
+		if logic == null:
+			return
+		if logic.apply_choice(sender, card_id):
+			player_upgrade.emit(sender, card_id)
+		return
 	if mode != Mode.HOST:
 		return
-	var sender := multiplayer.get_remote_sender_id()
 	if sender == 0 or sender == 1:
 		return
 	if _host.apply_choice(sender, card_id):
@@ -663,7 +917,7 @@ func _rpc_auth_result(op: int, ok: bool, username: String, err_code: int) -> voi
 
 @rpc("any_peer", "call_remote", "reliable", 0)
 func _rpc_declare(client_version: int, peer_role: int) -> void:
-	if mode != Mode.HOST:
+	if not _is_host_like():
 		return
 	var sender := multiplayer.get_remote_sender_id()
 	if sender == 0 or sender == 1:
@@ -683,7 +937,7 @@ func _rpc_declare(client_version: int, peer_role: int) -> void:
 
 @rpc("any_peer", "call_remote", "reliable", 0)
 func _rpc_register(username: String, salt_b64: String, verifier_b64: String) -> void:
-	if mode != Mode.HOST:
+	if not _is_host_like():
 		return
 	var sender := multiplayer.get_remote_sender_id()
 	if sender == 0 or sender == 1:
@@ -697,7 +951,7 @@ func _rpc_register(username: String, salt_b64: String, verifier_b64: String) -> 
 
 @rpc("any_peer", "call_remote", "reliable", 0)
 func _rpc_login_begin(username: String) -> void:
-	if mode != Mode.HOST:
+	if not _is_host_like():
 		return
 	var sender := multiplayer.get_remote_sender_id()
 	if sender == 0 or sender == 1:
@@ -716,7 +970,7 @@ func _rpc_login_begin(username: String) -> void:
 
 @rpc("any_peer", "call_remote", "reliable", 0)
 func _rpc_login_proof(proof_b64: String) -> void:
-	if mode != Mode.HOST:
+	if not _is_host_like():
 		return
 	var sender := multiplayer.get_remote_sender_id()
 	if sender == 0 or sender == 1:
@@ -732,7 +986,7 @@ func _rpc_login_proof(proof_b64: String) -> void:
 
 @rpc("any_peer", "call_remote", "reliable", 0)
 func _rpc_logout() -> void:
-	if mode != Mode.HOST:
+	if not _is_host_like():
 		return
 	var sender := multiplayer.get_remote_sender_id()
 	if sender == 0 or sender == 1:
@@ -741,3 +995,119 @@ func _rpc_logout() -> void:
 		_account_server.logout(sender)
 	account_session_closed.emit()  # 偏离 9：HOST 侧也发一份，供专服打日志
 	_rpc_auth_result.rpc_id(sender, Protocol.OP_LOGOUT, true, "", AccountLib.ERR.OK)
+
+
+# ---------------- 房间 RPC（大厅专服，M6.3） ----------------
+
+@rpc("any_peer", "call_remote", "reliable", 0)
+func _rpc_room_create() -> void:
+	var sender := multiplayer.get_remote_sender_id()
+	if mode == Mode.HOST:
+		if sender != 0:
+			_rpc_room_error.rpc_id(sender, LobbyLib.ERR.UNSUPPORTED)
+		return
+	if mode != Mode.SERVER or sender == 0 or _lobby == null:
+		return
+	var res: Dictionary = _lobby.create_room(sender)
+	if not bool(res["ok"]):
+		_rpc_room_error.rpc_id(sender, int(res["err"]))
+		return
+	var code := String(res["code"])
+	_broadcast_room_state(code)
+	lobby_event.emit("created", code, sender)
+
+
+@rpc("any_peer", "call_remote", "reliable", 0)
+func _rpc_room_join(code: String) -> void:
+	var sender := multiplayer.get_remote_sender_id()
+	if mode == Mode.HOST:
+		if sender != 0:
+			_rpc_room_error.rpc_id(sender, LobbyLib.ERR.UNSUPPORTED)
+		return
+	if mode != Mode.SERVER or sender == 0 or _lobby == null:
+		return
+	var res: Dictionary = _lobby.join_room(sender, code)
+	if not bool(res["ok"]):
+		_rpc_room_error.rpc_id(sender, int(res["err"]))
+		return
+	var joined := String(res["code"])
+	var logic = _lobby.logic_of(joined)
+	if logic != null:
+		_rpc_room.rpc_id(sender, Protocol.encode_room(logic.room_walls))
+	_broadcast_room_state(joined)
+	lobby_event.emit("joined", joined, sender)
+
+
+@rpc("any_peer", "call_remote", "reliable", 0)
+func _rpc_room_leave() -> void:
+	var sender := multiplayer.get_remote_sender_id()
+	if mode == Mode.HOST:
+		if sender != 0:
+			_rpc_room_error.rpc_id(sender, LobbyLib.ERR.UNSUPPORTED)
+		return
+	if mode != Mode.SERVER or sender == 0 or _lobby == null:
+		return
+	var code: String = _lobby.room_of(sender)
+	if code.is_empty():
+		_rpc_room_error.rpc_id(sender, LobbyLib.ERR.NOT_IN_ROOM)
+		return
+	var was_host: bool = _lobby.is_host(sender)
+	var others: PackedInt32Array = _lobby.members_of(code)
+	_lobby.leave_room(sender)
+	_rpc_room_state.rpc_id(sender, "", false, LobbyLib.STATE.WAITING, PackedStringArray())
+	if was_host:
+		for peer in others:
+			if int(peer) == sender:
+				continue
+			_rpc_room_error.rpc_id(int(peer), LobbyLib.ERR.ROOM_NOT_FOUND)
+			_rpc_room_state.rpc_id(
+				int(peer), "", false, LobbyLib.STATE.WAITING, PackedStringArray()
+			)
+		lobby_event.emit("destroyed", code, sender)
+	else:
+		_broadcast_room_state(code)
+		lobby_event.emit("left", code, sender)
+
+
+@rpc("any_peer", "call_remote", "reliable", 0)
+func _rpc_room_start() -> void:
+	var sender := multiplayer.get_remote_sender_id()
+	if mode == Mode.HOST:
+		if sender != 0:
+			_rpc_room_error.rpc_id(sender, LobbyLib.ERR.UNSUPPORTED)
+		return
+	if mode != Mode.SERVER or sender == 0 or _lobby == null:
+		return
+	var res: Dictionary = _lobby.start_run(sender)
+	if not bool(res["ok"]):
+		_rpc_room_error.rpc_id(sender, int(res["err"]))
+		return
+	var code := String(res["code"])
+	var logic = _lobby.logic_of(code)
+	if logic != null:
+		for peer in _lobby.members_of(code):
+			_rpc_room.rpc_id(int(peer), Protocol.encode_room(logic.room_walls))
+	_broadcast_room_state(code)
+	lobby_event.emit("started", code, sender)
+
+
+@rpc("authority", "call_remote", "reliable", 0)
+func _rpc_room_state(code: String, is_host: bool, state: int, members: PackedStringArray) -> void:
+	if mode != Mode.CLIENT:
+		return
+	if state == LobbyLib.STATE.RUNNING:
+		# 结算不拆连接：新一局开局必须解除上一局的结算冻结，否则客户端不再上报输入、
+		# 本地预测与弹丸也被 is_run_over() 冻结，第二局会整屏僵死
+		_client.run_over = false
+		_client.pending_move = Vector2.ZERO
+		_client.pending_buttons = 0
+	room_state.emit(code, is_host, state, members)
+
+
+@rpc("authority", "call_remote", "reliable", 0)
+func _rpc_room_error(err: int) -> void:
+	if mode != Mode.CLIENT:
+		return
+	room_error.emit(err)
+
+# gdlint:ignore=max-file-lines

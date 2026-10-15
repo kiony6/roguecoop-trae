@@ -20,6 +20,8 @@ const SUITES: Array = [
 	preload("res://tools/tests/test_account.gd"),
 	preload("res://tools/tests/test_store.gd"),
 	preload("res://tools/tests/test_account_server.gd"),
+	preload("res://tools/tests/test_lobby.gd"),
+	preload("res://tools/tests/test_lobby_server.gd"),
 ]
 
 
