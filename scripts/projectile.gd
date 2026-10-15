@@ -35,6 +35,11 @@ func push_authoritative(pos: Vector2, dir: Vector2, k: int) -> void:
 func _physics_process(_delta: float) -> void:
 	if not _has_auth:
 		return
+	# M4.5：本局结算后权威位置被冻结，若继续航位推算，
+	# 每帧自推进都会被下一帧快照拽回，表现为弹丸抽搐
+	if Net.is_run_over():
+		position = _auth
+		return
 	if Net.is_client():
 		var dt := (float(Time.get_ticks_msec()) - _recv_ms) / 1000.0
 		position = _auth + _dir.normalized() * Weapons.speed(kind) * dt
