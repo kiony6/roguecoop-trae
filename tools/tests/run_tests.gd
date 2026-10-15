@@ -15,6 +15,7 @@ const SUITES: Array = [
 	preload("res://tools/tests/test_aoi.gd"),
 	preload("res://tools/tests/test_net_host_combat.gd"),
 	preload("res://tools/tests/test_net_transport.gd"),
+	preload("res://tools/tests/test_net_idle.gd"),
 ]
 
 

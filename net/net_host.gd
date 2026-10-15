@@ -9,6 +9,7 @@ const Progression := preload("res://sim/progression.gd")
 const Weapons := preload("res://sim/weapons.gd")
 const Rooms := preload("res://sim/rooms.gd")
 const Waves := preload("res://sim/waves.gd")
+const IDLE_RESET_SECONDS := 10.0  # 空场（无人接入）持续这么久且上一局被玩过 → 整局状态归零
 
 var tick := 0
 var snapshot_count := 0
@@ -31,6 +32,8 @@ var players := {}  # id -> {pos, move, buttons, hp, status, fire_cd, invuln,
 var enemies := {}  # id -> {pos, hp, kind, touch_cd}
 var loot := {}  # id -> {pos, kind, owner, ttl}
 var projectiles := {}  # id -> {pos, vel, ttl, dmg, owner}
+var idle_resets := 0  # 累计「空场超时归零」次数，供运维日志观测
+var idle_reset_seconds := 0.0  # 最近一次复位时的空置时长
 
 var _next_id := 1
 var _spawn_accum := 0.0
@@ -38,6 +41,8 @@ var _next_boss_at := Combat.BOSS_EVERY_KILLS
 var _offer := {}  # id -> Array[card_id]，本升级的候选卡
 var _offer_sent := {}  # id -> bool，候选是否已下发
 var _rng := RandomNumberGenerator.new()
+var _dedicated := false
+var _idle_seconds := 0.0
 
 
 func reset(dedicated: bool = false) -> void:
@@ -64,6 +69,8 @@ func reset(dedicated: bool = false) -> void:
 	_offer = {}
 	_offer_sent = {}
 	_rng.seed = 20261015
+	_dedicated = dedicated
+	_idle_seconds = 0.0
 
 
 func add_player(id: int) -> void:
@@ -111,6 +118,11 @@ func spawn_boss() -> int:
 func physics_step(delta: float) -> void:
 	if run_over:
 		return
+	# M5.2：无人接入时不推进模拟（tick/elapsed 全冻结），避免空置时长把波次难度无限抬高
+	if players.is_empty():
+		_step_idle(delta)
+		return
+	_idle_seconds = 0.0
 	tick += 1
 	elapsed += delta
 	var w := Waves.wave_index(elapsed)
@@ -416,6 +428,19 @@ func _step_spawner(delta: float) -> void:
 	if kills >= _next_boss_at and boss_id == 0 and not players.is_empty():
 		spawn_boss()
 		_next_boss_at += Combat.BOSS_EVERY_KILLS
+
+
+func _step_idle(delta: float) -> void:
+	## M5.2：空场步进。既不推进波次计时，也不跑任何模拟。
+	## 仅当上一局确实被玩过（elapsed > 0）且空置已达 IDLE_RESET_SECONDS 时，把整局状态就地归零，
+	## 让下一位接入的玩家面对全新开局，而不是一个被打残、波次还偏高的残局。
+	## 归零后 elapsed 变为 0，幂等保护使复位不会反复触发（刚启动的空服务器永远静止在 wave = 1）。
+	_idle_seconds += delta
+	if _idle_seconds < IDLE_RESET_SECONDS or elapsed <= 0.0:
+		return
+	idle_reset_seconds = _idle_seconds
+	reset(_dedicated)
+	idle_resets += 1
 
 
 # ---------------- 内部辅助 ----------------
