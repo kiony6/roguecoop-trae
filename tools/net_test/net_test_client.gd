@@ -3,10 +3,9 @@ extends Node
 
 const Protocol := preload("res://net/protocol.gd")
 
-# 场景说明：玩家速度(220)远快于敌人(90)，若持续开火会在弹道射程外击杀敌人，
-# 掉落物落在行进线外、超出磁吸半径(90)，永不拾取 → 经验恒 0、无法升级。
-# 故先右移满足位移断言，随后原地等待，仅在敌人贴近(<=FIRE_NEAR)时开火，
-# 使敌人在近身被击杀、掉落落入磁吸范围而被拾取，触发共享经验池升级。
+# 场景说明：M4.4 武器改为自动攻击（无需按键）、碎片从任意距离飞向击杀者。
+# 经验已按拾取者独立，故客户端不能与主机站位重合（重合时同距击杀归主机）。
+# 客户端前段右移满足位移断言，随后左移远离主机，使两端各自就近击杀、各自拾取自己的经验。
 const MOVE_BEFORE := 1.5
 const FIRE_NEAR := 70.0
 
@@ -46,12 +45,11 @@ func _ready() -> void:
 
 
 func _physics_process(_delta: float) -> void:
-	# 前段右移（满足位移断言）；之后原地等待，仅在敌人贴近时开火，迫使近身击杀→拾取
+	# 前段右移（满足位移断言）；随后左移远离主机，各自就近击杀并拾取自己的经验
 	if _t < MOVE_BEFORE:
-		Net.send_local_input(Vector2.RIGHT, 1)
+		Net.send_local_input(Vector2.RIGHT, 0)
 	else:
-		var btn := 1 if _nearest_enemy <= FIRE_NEAR else 0
-		Net.send_local_input(Vector2.ZERO, btn)
+		Net.send_local_input(Vector2.LEFT, 0)
 
 
 func _on_connected(local_id: int) -> void:

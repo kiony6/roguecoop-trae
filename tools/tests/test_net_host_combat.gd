@@ -1,6 +1,6 @@
 extends RefCounted
 ## 主机权威逻辑测试（纯逻辑，无传输）。
-## 覆盖：开火击杀→掉落→拾取、接触伤害、共享经验升级→每人独立选卡、
+## 覆盖：开火击杀→掉落→拾取、接触伤害、每人独立经验升级→每人独立选卡、
 ## 倒地→救援→复苏、无存活玩家→失败结算（M4.3 起不再有永久阵亡）、Boss 生成、Boss 数达标→胜利结算。
 
 const Harness := preload("res://tools/tests/harness.gd")
@@ -42,7 +42,8 @@ func run() -> int:
 	var h3 := NetHostLogic.new()
 	h3.reset()
 	h3.spawn_interval = 9999.0
-	h3.spawn_enemy(Vector2(0, 0))
+	var eid3 := h3.spawn_enemy(Vector2(0, 0))
+	h3.enemies[eid3]["hp"] = 999999
 	var hp0: int = h3.players[1]["hp"]
 	for _i in range(30):
 		h3.physics_step(0.016)
@@ -68,7 +69,7 @@ func run() -> int:
 	h5.loot[2] = {"pos": Vector2(14, 0), "kind": Combat.LOOT_KIND_XP}
 	for _i in range(20):
 		h5.physics_step(0.016)
-	t.check(h5.level >= 2, "拾取 2 个碎片（共 10 经验）后升到 2 级")
+	t.check(int(h5.players[1]["level"]) >= 2, "拾取 2 个碎片（共 10 经验）后升到 2 级")
 	var offers := h5.pending_offer(1)
 	t.eq(offers.size(), 3, "升级后产生 3 张候选卡")
 	t.eq(h5.pending_offer(1).size(), 0, "同一升级的候选只下发一次")
@@ -88,7 +89,8 @@ func run() -> int:
 	h6.add_player(2)
 	h6.set_remote_input(2, Vector2.ZERO, 0)
 	h6.players[2]["pos"] = Vector2(1000, 0)
-	h6.spawn_enemy(Vector2(0, 0))
+	var eid6 := h6.spawn_enemy(Vector2(0, 0))
+	h6.enemies[eid6]["hp"] = 999999
 	for _i in range(480):
 		h6.physics_step(0.016)
 	t.eq(h6.players[1]["status"], Combat.PLAYER_DOWNED, "血量归零进入倒地")
@@ -104,7 +106,8 @@ func run() -> int:
 	var h8 := NetHostLogic.new()
 	h8.reset()
 	h8.spawn_interval = 9999.0
-	h8.spawn_enemy(Vector2(0, 0))
+	var eid8 := h8.spawn_enemy(Vector2(0, 0))
+	h8.enemies[eid8]["hp"] = 999999
 	for _i in range(480):
 		h8.physics_step(0.016)
 	t.eq(h8.players[1]["status"], Combat.PLAYER_DOWNED, "单人倒地保持倒地（不再永久阵亡）")
@@ -134,8 +137,8 @@ func run() -> int:
 	# (11) 元数据与统计导出
 	var h11 := NetHostLogic.new()
 	h11.reset()
-	t.eq(h11.meta()["level"], 1, "初始等级 1")
-	t.check(h11.stats().has("seconds"), "stats 含存活时长")
+	t.eq(h11.meta(1)["level"], 1, "初始等级 1")
+	t.check(h11.stats(1).has("seconds"), "stats 含存活时长")
 
 	# (12) 武器：霰弹枪一次开火产生多枚弹丸，且可导出弹丸状态
 	var h12 := NetHostLogic.new()

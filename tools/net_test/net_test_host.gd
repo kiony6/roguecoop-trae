@@ -100,8 +100,8 @@ func _process(delta: float) -> void:
 	_t += delta
 	# 最少存活 4s，保证客户端有足够时间收满快照并观察到位移/战斗/升级
 	var combat_ok := _enemy_seen and _enemy_killed and _loot_seen
-	# 等级达标后再停留 0.6s，确保客户端至少收到一份包含 level>=2 的快照后才退出
-	var linger_ok := _level_seen and (_t - _level_seen_at) > 0.6
+	# 等级达标后再停留足够时长，确保对端也拾取到自己的经验（各自独立升级）后才退出
+	var linger_ok := _level_seen and (_t - _level_seen_at) > 15.0
 	if (
 		_remote_input
 		and _saw_two
