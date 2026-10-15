@@ -1,0 +1,64 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/room.gd" id="1_room"]
+
+[node name="Room" type="Control"]
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("1_room")
+
+[node name="BackButton" type="Button" parent="."]
+offset_left = 16.0
+offset_top = 12.0
+offset_right = 200.0
+offset_bottom = 44.0
+theme_type_variation = &"TextButton"
+text = "← 离开房间"
+
+[node name="Center" type="CenterContainer" parent="."]
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="Card" type="PanelContainer" parent="Center"]
+theme_type_variation = &"Card"
+
+[node name="Box" type="VBoxContainer" parent="Center/Card"]
+custom_minimum_size = Vector2(420, 0)
+theme_override_constants/separation = 16
+
+[node name="Title" type="Label" parent="Center/Card/Box"]
+theme_type_variation = &"Title"
+text = "房间"
+horizontal_alignment = 1
+
+[node name="Hint" type="Label" parent="Center/Card/Box"]
+theme_type_variation = &"Caption"
+text = "把下面这串组队码发给队友"
+horizontal_alignment = 1
+
+[node name="Code" type="Label" parent="Center/Card/Box"]
+theme_type_variation = &"Code"
+text = "204815"
+horizontal_alignment = 1
+
+[node name="Members" type="VBoxContainer" parent="Center/Card/Box"]
+theme_override_constants/separation = 4
+
+[node name="Host" type="Label" parent="Center/Card/Box/Members"]
+text = "房主 · 你"
+
+[node name="Peer" type="Label" parent="Center/Card/Box/Members"]
+theme_type_variation = &"Caption"
+text = "队友 · 等待加入…"
+
+[node name="StartButton" type="Button" parent="Center/Card/Box"]
+custom_minimum_size = Vector2(0, 56)
+theme_type_variation = &"PrimaryButton"
+disabled = true
+tooltip_text = "大厅与组队码见子项目 3"
+text = "开始（需 2 人）"
+
+[node name="Footnote" type="Label" parent="Center/Card/Box"]
+theme_type_variation = &"Caption"
+text = "占位页：真实功能见子项目 3"
+horizontal_alignment = 1

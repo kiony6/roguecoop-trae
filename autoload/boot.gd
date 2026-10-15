@@ -2,6 +2,8 @@ extends Node
 ## 启动引导：运行期注册 InputMap。
 ## 这样可避免手写 project.godot 里冗长的 InputEventKey 字面量。
 
+const UiTheme := preload("res://scripts/ui/theme/ui_theme.gd")
+
 const ACTIONS := {
 	"move_up": [KEY_W, KEY_UP],
 	"move_down": [KEY_S, KEY_DOWN],
@@ -13,6 +15,7 @@ const ACTIONS := {
 
 
 func _ready() -> void:
+	get_window().theme = UiTheme.build()
 	for action in ACTIONS:
 		if not InputMap.has_action(action):
 			InputMap.add_action(action, 0.2)

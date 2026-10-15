@@ -1,0 +1,47 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/direct_connect.gd" id="1_direct"]
+
+[node name="DirectConnect" type="Control"]
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("1_direct")
+
+[node name="BackButton" type="Button" parent="."]
+offset_left = 16.0
+offset_top = 12.0
+offset_right = 200.0
+offset_bottom = 44.0
+theme_type_variation = &"TextButton"
+text = "← 返回主菜单"
+
+[node name="Panel" type="VBoxContainer" parent="."]
+offset_left = 480.0
+offset_top = 280.0
+offset_right = 800.0
+offset_bottom = 460.0
+theme_override_constants/separation = 12
+
+[node name="Title" type="Label" parent="Panel"]
+text = "RogueCoop · 局域网直连"
+
+[node name="IpField" type="LineEdit" parent="Panel"]
+text = "127.0.0.1"
+placeholder_text = "主机 IP"
+
+[node name="PortField" type="LineEdit" parent="Panel"]
+text = "25600"
+placeholder_text = "端口（UDP）"
+
+[node name="TransportOption" type="OptionButton" parent="Panel"]
+
+[node name="HostButton" type="Button" parent="Panel"]
+theme_type_variation = &"PrimaryButton"
+text = "建立主机"
+
+[node name="JoinButton" type="Button" parent="Panel"]
+text = "加入主机"
+
+[node name="Status" type="Label" parent="Panel"]
+theme_type_variation = &"Caption"
+text = ""

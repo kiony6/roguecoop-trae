@@ -1,6 +1,6 @@
 extends Control
-## 主菜单：建立主机 / 加入主机（支持 --ip= / --port= / --transport= 命令行预填）。
-## --auto=join 时免点击直接加入，供非 headless 双窗口画面验收用。
+## 局域网直连（P2 通道，免登录、不入榜）：旧 scenes/main.tscn 的表单原样迁移。
+## 支持 --ip= / --port= / --transport= 命令行预填；--auto=join 免点击直接加入（M5/M5.1 验收协议）。
 
 const Protocol := preload("res://net/protocol.gd")
 
@@ -13,6 +13,7 @@ var _auto_join := false
 
 
 func _ready() -> void:
+	$BackButton.pressed.connect(_on_back_pressed)
 	$Panel/HostButton.pressed.connect(_on_host_pressed)
 	$Panel/JoinButton.pressed.connect(_on_join_pressed)
 	Net.connected_ok.connect(_on_connected, CONNECT_ONE_SHOT)
@@ -31,7 +32,12 @@ func _ready() -> void:
 		elif a.begins_with("--auto="):
 			_auto_join = a.substr(7) == "join"
 	if _auto_join:
+		print("[DirectConnect] 命令行透传生效，auto-join 免点击加入")
 		_on_join_pressed.call_deferred()
+
+
+func _on_back_pressed() -> void:
+	get_tree().change_scene_to_file("res://scenes/main.tscn")
 
 
 func _on_host_pressed() -> void:

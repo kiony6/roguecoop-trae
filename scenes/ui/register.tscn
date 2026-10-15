@@ -1,0 +1,65 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/register.gd" id="1_register"]
+
+[node name="Register" type="Control"]
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("1_register")
+
+[node name="Center" type="CenterContainer" parent="."]
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="Card" type="PanelContainer" parent="Center"]
+theme_type_variation = &"Card"
+
+[node name="Box" type="VBoxContainer" parent="Center/Card"]
+custom_minimum_size = Vector2(320, 0)
+theme_override_constants/separation = 12
+
+[node name="Title" type="Label" parent="Center/Card/Box"]
+theme_type_variation = &"Title"
+text = "注册"
+horizontal_alignment = 1
+
+[node name="Note" type="Label" parent="Center/Card/Box"]
+theme_type_variation = &"Caption"
+text = "密码只在本机派生，服务端不会收到你的密码"
+horizontal_alignment = 1
+autowrap_mode = 2
+
+[node name="UserName" type="LineEdit" parent="Center/Card/Box"]
+placeholder_text = "用户名"
+
+[node name="Password" type="LineEdit" parent="Center/Card/Box"]
+placeholder_text = "密码"
+secret = true
+
+[node name="ConfirmPassword" type="LineEdit" parent="Center/Card/Box"]
+placeholder_text = "确认密码"
+secret = true
+
+[node name="RegisterButton" type="Button" parent="Center/Card/Box"]
+custom_minimum_size = Vector2(0, 56)
+theme_type_variation = &"PrimaryButton"
+disabled = true
+tooltip_text = "账号系统见子项目 2"
+text = "注册"
+
+[node name="BackToLogin" type="Button" parent="Center/Card/Box"]
+theme_type_variation = &"TextButton"
+text = "← 返回登录"
+
+[node name="Footnote" type="Label" parent="Center/Card/Box"]
+theme_type_variation = &"Caption"
+text = "占位页：真实功能见子项目 2"
+horizontal_alignment = 1
+
+[node name="BackButton" type="Button" parent="."]
+offset_left = 16.0
+offset_top = 12.0
+offset_right = 200.0
+offset_bottom = 44.0
+theme_type_variation = &"TextButton"
+text = "← 返回主菜单"

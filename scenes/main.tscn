@@ -1,36 +1,58 @@
 [gd_scene load_steps=2 format=3]
 
-[ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
+[ext_resource type="Script" path="res://scripts/ui/main_menu.gd" id="1_menu"]
 
-[node name="Main" type="Control"]
+[node name="MainMenu" type="Control"]
 anchor_right = 1.0
 anchor_bottom = 1.0
-script = ExtResource("1_main")
+script = ExtResource("1_menu")
 
-[node name="Panel" type="VBoxContainer" parent="."]
-offset_left = 480.0
-offset_top = 280.0
-offset_right = 800.0
-offset_bottom = 460.0
+[node name="Center" type="CenterContainer" parent="."]
+anchor_right = 1.0
+anchor_bottom = 1.0
 
-[node name="Title" type="Label" parent="Panel"]
-text = "RogueCoop · 肉鸽多人联机"
+[node name="Box" type="VBoxContainer" parent="Center"]
+custom_minimum_size = Vector2(320, 0)
+theme_override_constants/separation = 16
 
-[node name="IpField" type="LineEdit" parent="Panel"]
-text = "127.0.0.1"
-placeholder_text = "主机 IP"
+[node name="TitleLabel" type="Label" parent="Center/Box"]
+theme_type_variation = &"Title"
+text = "RogueCoop"
+horizontal_alignment = 1
 
-[node name="PortField" type="LineEdit" parent="Panel"]
-text = "25600"
-placeholder_text = "端口（UDP）"
+[node name="SubTitle" type="Label" parent="Center/Box"]
+theme_type_variation = &"Caption"
+text = "肉鸽多人联机 · 合作 PvE 割草"
+horizontal_alignment = 1
 
-[node name="TransportOption" type="OptionButton" parent="Panel"]
+[node name="LobbyButton" type="Button" parent="Center/Box"]
+custom_minimum_size = Vector2(0, 56)
+theme_type_variation = &"PrimaryButton"
+text = "联机大厅"
 
-[node name="HostButton" type="Button" parent="Panel"]
-text = "建立主机"
+[node name="DirectButton" type="Button" parent="Center/Box"]
+custom_minimum_size = Vector2(0, 48)
+text = "局域网直连"
 
-[node name="JoinButton" type="Button" parent="Panel"]
-text = "加入主机"
+[node name="Links" type="HBoxContainer" parent="Center/Box"]
+alignment = 1
+theme_override_constants/separation = 8
 
-[node name="Status" type="Label" parent="Panel"]
-text = ""
+[node name="LeaderboardButton" type="Button" parent="Center/Box/Links"]
+theme_type_variation = &"TextButton"
+text = "排行榜"
+
+[node name="SettingsButton" type="Button" parent="Center/Box/Links"]
+theme_type_variation = &"TextButton"
+text = "设置"
+
+[node name="Version" type="Label" parent="."]
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 12.0
+offset_top = -32.0
+offset_right = -12.0
+offset_bottom = -12.0
+theme_type_variation = &"Caption"
+text = "v0.6.1-ui · 未连接"

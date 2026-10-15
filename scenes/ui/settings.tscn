@@ -1,0 +1,34 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/settings.gd" id="1_settings"]
+
+[node name="Settings" type="Control"]
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("1_settings")
+
+[node name="BackButton" type="Button" parent="."]
+offset_left = 16.0
+offset_top = 12.0
+offset_right = 200.0
+offset_bottom = 44.0
+theme_type_variation = &"TextButton"
+text = "← 返回主菜单"
+
+[node name="Center" type="CenterContainer" parent="."]
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="Box" type="VBoxContainer" parent="Center"]
+custom_minimum_size = Vector2(420, 0)
+theme_override_constants/separation = 12
+
+[node name="Title" type="Label" parent="Center/Box"]
+theme_type_variation = &"Title"
+text = "设置"
+horizontal_alignment = 1
+
+[node name="Note" type="Label" parent="Center/Box"]
+theme_type_variation = &"Caption"
+text = "当前版本无可用设置项"
+horizontal_alignment = 1
