@@ -117,32 +117,36 @@ func _process(delta: float) -> void:
 	):
 		print(
 			(
-				"[NetTest-Host] PASS remote_input=1 two_players=1 client_moved=1 host_moved=1 "
-				+ "enemy_seen=1 enemy_killed=1 loot_seen=1 loot_picked=%d level_seen=1 "
-				+ "status_seen=1 proj_seen=1 room_ok=1 wave_ok=1"
+				(
+					"[NetTest-Host] PASS remote_input=1 two_players=1 client_moved=1 host_moved=1 "
+					+ "enemy_seen=1 enemy_killed=1 loot_seen=1 loot_picked=%d level_seen=1 "
+					+ "status_seen=1 proj_seen=1 room_ok=1 wave_ok=1"
+				)
+				% (1 if _loot_picked else 0)
 			)
-			% (1 if _loot_picked else 0)
 		)
 		get_tree().quit(0)
 	elif _t > 25.0:
 		printerr(
 			(
-				"[NetTest-Host] FAIL timeout remote_input=%s two=%s cmoved=%s hmoved=%s "
-				+ "eseen=%s ekilled=%s lseen=%s level=%s status=%s proj=%s room=%s wave=%s"
+				(
+					"[NetTest-Host] FAIL timeout remote_input=%s two=%s cmoved=%s hmoved=%s "
+					+ "eseen=%s ekilled=%s lseen=%s level=%s status=%s proj=%s room=%s wave=%s"
+				)
+				% [
+					_remote_input,
+					_saw_two,
+					_client_moved,
+					_host_moved,
+					_enemy_seen,
+					_enemy_killed,
+					_loot_seen,
+					_level_seen,
+					_status_seen,
+					_proj_seen,
+					_room_ok,
+					_wave_ok,
+				]
 			)
-			% [
-				_remote_input,
-				_saw_two,
-				_client_moved,
-				_host_moved,
-				_enemy_seen,
-				_enemy_killed,
-				_loot_seen,
-				_level_seen,
-				_status_seen,
-				_proj_seen,
-				_room_ok,
-				_wave_ok,
-			]
 		)
 		get_tree().quit(1)

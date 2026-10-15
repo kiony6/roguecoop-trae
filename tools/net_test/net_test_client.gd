@@ -118,30 +118,34 @@ func _process(delta: float) -> void:
 	):
 		print(
 			(
-				"[NetTest-Client] PASS local_id=%d snapshots=%d two_players=1 moved=1 "
-				+ "enemy_seen=1 loot_seen=1 level_seen=1 status_seen=1 proj_seen=1 room_ok=1"
+				(
+					"[NetTest-Client] PASS local_id=%d snapshots=%d two_players=1 moved=1 "
+					+ "enemy_seen=1 loot_seen=1 level_seen=1 status_seen=1 proj_seen=1 room_ok=1"
+				)
+				% [Net.local_id, _snapshots]
 			)
-			% [Net.local_id, _snapshots]
 		)
 		get_tree().quit(0)
 	elif _t > 25.0:
 		printerr(
 			(
-				"[NetTest-Client] FAIL timeout connected=%s snapshots=%d two=%s self=%s "
-				+ "moved=%s eseen=%s lseen=%s level=%s status=%s proj=%s room=%s"
+				(
+					"[NetTest-Client] FAIL timeout connected=%s snapshots=%d two=%s self=%s "
+					+ "moved=%s eseen=%s lseen=%s level=%s status=%s proj=%s room=%s"
+				)
+				% [
+					_connected,
+					_snapshots,
+					_saw_two,
+					_self_seen,
+					_self_moved,
+					_enemy_seen,
+					_loot_seen,
+					_level_seen,
+					_status_seen,
+					_proj_seen,
+					_room_ok,
+				]
 			)
-			% [
-				_connected,
-				_snapshots,
-				_saw_two,
-				_self_seen,
-				_self_moved,
-				_enemy_seen,
-				_loot_seen,
-				_level_seen,
-				_status_seen,
-				_proj_seen,
-				_room_ok,
-			]
 		)
 		get_tree().quit(1)

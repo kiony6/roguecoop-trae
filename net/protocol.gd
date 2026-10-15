@@ -26,7 +26,6 @@ const LOOT_BYTES := 13
 const PROJ_BYTES := 15
 const ROOM_BYTES := 16
 
-
 # ---------------- 输入帧 ----------------
 # 布局: i8 move_x | i8 move_y | i8 aim_x | i8 aim_y | u8 buttons
 
@@ -241,15 +240,12 @@ static func decode_room(b: PackedByteArray) -> Array:
 	for _i in wc:
 		if o + ROOM_BYTES > b.size():
 			break
-		(
-			walls
-			. append(
-				Rect2(
-					b.decode_float(o),
-					b.decode_float(o + 4),
-					b.decode_float(o + 8),
-					b.decode_float(o + 12)
-				)
+		walls.append(
+			Rect2(
+				b.decode_float(o),
+				b.decode_float(o + 4),
+				b.decode_float(o + 8),
+				b.decode_float(o + 12)
 			)
 		)
 		o += ROOM_BYTES

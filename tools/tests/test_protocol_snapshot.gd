@@ -12,7 +12,14 @@ func run() -> int:
 	var meta: Dictionary = {"level": 3, "xp": 7, "kills": 42}
 	var players: Array = [
 		{"id": 1, "pos": Vector2(10.5, -20.25), "hp": 100, "status": 0, "revive01": 0, "weapon": 0},
-		{"id": big_id, "pos": Vector2(0.0, 0.0), "hp": 42, "status": 1, "revive01": 255, "weapon": 2},
+		{
+			"id": big_id,
+			"pos": Vector2(0.0, 0.0),
+			"hp": 42,
+			"status": 1,
+			"revive01": 255,
+			"weapon": 2
+		},
 	]
 	var enemies: Array = [
 		{"id": 7, "pos": Vector2(-3.5, 8.0), "hp": 200, "kind": 1},

@@ -315,7 +315,12 @@ func _rpc_snapshot(_tick_in: int, payload: PackedByteArray) -> void:
 	_client.last_meta = snap["meta"]
 	_client.last_players = snap["players"]
 	world_state.emit(
-		snap["tick"], snap["meta"], snap["players"], snap["enemies"], snap["loot"], snap["projectiles"]
+		snap["tick"],
+		snap["meta"],
+		snap["players"],
+		snap["enemies"],
+		snap["loot"],
+		snap["projectiles"]
 	)
 
 
