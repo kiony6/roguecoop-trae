@@ -90,3 +90,8 @@ static func ttl(id: int) -> float:
 
 static func radius(id: int) -> float:
 	return float(by_id(id)["radius"])
+
+
+static func reach(id: int) -> float:
+	## M4.4：武器有效射程 = 弹速 × 存活时间，作为自动攻击的索敌门限。
+	return speed(id) * ttl(id)

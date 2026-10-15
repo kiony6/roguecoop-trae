@@ -1,6 +1,6 @@
 extends RefCounted
 ## 主机权威模拟（纯逻辑，不含传输）。由 autoload Net 驱动。
-## M3：在 M2 战斗之上叠加共享经验池+每人独立选卡、倒地/救援/阵亡、Boss 与结算判定。
+## M3：在 M2 战斗之上叠加每人独立经验与等级+每人独立选卡、倒地/救援/阵亡、Boss 与结算判定。
 
 const Movement := preload("res://sim/movement.gd")
 const Combat := preload("res://sim/combat.gd")
@@ -19,8 +19,6 @@ var wave := 1
 var room_walls: Array = []
 
 # —— 队伍成长与结算 ——
-var level := 1
-var xp := 0
 var kills := 0
 var boss_kills := 0
 var elapsed := 0.0
@@ -29,10 +27,10 @@ var won := false
 var boss_id := 0
 
 var players := {}  # id -> {pos, move, buttons, hp, status, fire_cd, invuln,
-# revive_progress, pickups, mods}
+# revive_progress, pickups, mods, level, xp}
 var enemies := {}  # id -> {pos, hp, kind, touch_cd}
-var loot := {}  # id -> {pos, kind}
-var projectiles := {}  # id -> {pos, vel, ttl, dmg}
+var loot := {}  # id -> {pos, kind, owner, ttl}
+var projectiles := {}  # id -> {pos, vel, ttl, dmg, owner}
 
 var _next_id := 1
 var _spawn_accum := 0.0
@@ -50,8 +48,6 @@ func reset() -> void:
 	spawn_interval = Waves.spawn_interval(1)
 	wave = 1
 	room_walls = Rooms.generate(20261015)
-	level = 1
-	xp = 0
 	kills = 0
 	boss_kills = 0
 	elapsed = 0.0
@@ -134,12 +130,20 @@ func physics_step(delta: float) -> void:
 	_check_run_over()
 
 
-func meta() -> Dictionary:
-	return {"level": level, "xp": xp, "kills": kills, "boss_kills": boss_kills, "wave": wave}
+func meta(id: int) -> Dictionary:
+	var p: Dictionary = players[id]
+	return {
+		"level": int(p["level"]),
+		"xp": int(p["xp"]),
+		"kills": kills,
+		"boss_kills": boss_kills,
+		"wave": wave
+	}
 
 
-func stats() -> Dictionary:
-	return {"kills": kills, "level": level, "boss_kills": boss_kills, "seconds": elapsed}
+func stats(id: int) -> Dictionary:
+	var p: Dictionary = players[id]
+	return {"kills": kills, "level": int(p["level"]), "boss_kills": boss_kills, "seconds": elapsed}
 
 
 func player_states() -> Array:
@@ -203,21 +207,22 @@ func peer_ids() -> PackedInt32Array:
 	return ids
 
 
-# ---------------- 成长（共享经验池 + 每人独立选卡） ----------------
+# ---------------- 成长（每人独立经验与等级 + 每人独立选卡） ----------------
 
 
-func gain_xp(amount: int) -> int:
-	## 加减共享经验池；跨阈值则升级并为本轮所有存活玩家各发一次候选。
-	if amount <= 0:
+func gain_xp(id: int, amount: int) -> int:
+	## M4.4：经验记到拾取者本人（每人独立经验）；跨阈值则只给该玩家发一次候选。
+	if amount <= 0 or not players.has(id):
 		return 0
-	xp += amount
+	var p: Dictionary = players[id]
+	p["xp"] = int(p["xp"]) + amount
 	var ups := 0
-	while xp >= Progression.xp_to_next(level):
-		xp -= Progression.xp_to_next(level)
-		level += 1
+	while int(p["xp"]) >= Progression.xp_to_next(int(p["level"])):
+		p["xp"] = int(p["xp"]) - Progression.xp_to_next(int(p["level"]))
+		p["level"] = int(p["level"]) + 1
 		ups += 1
 	if ups > 0:
-		_grant_offers()
+		_grant_offer(id)
 	return ups
 
 
@@ -249,12 +254,11 @@ func apply_choice(id: int, card_id: int) -> bool:
 	return true
 
 
-func _grant_offers() -> void:
-	for id in players:
-		if players[id]["status"] == Combat.PLAYER_DEAD:
-			continue
-		_offer[id] = Progression.draw_choices(_rng, 3)
-		_offer_sent[id] = false
+func _grant_offer(id: int) -> void:
+	if not players.has(id) or players[id]["status"] == Combat.PLAYER_DEAD:
+		return
+	_offer[id] = Progression.draw_choices(_rng, 3)
+	_offer_sent[id] = false
 
 
 # ---------------- 内部步进 ----------------
@@ -270,20 +274,24 @@ func _step_players(delta: float) -> void:
 
 
 func _step_firing() -> void:
+	## M4.4：武器自动攻击——无需按键，最近敌人进入该武器有效射程即开火。
 	var targets := _enemy_positions()
 	for id in players:
 		var p: Dictionary = players[id]
 		if p["status"] != Combat.PLAYER_ALIVE:
 			continue
-		if (p["buttons"] & 1) == 0:
-			continue
 		if p["fire_cd"] > 0.0:
+			continue
+		var nearest := INF
+		for t in targets:
+			nearest = minf(nearest, p["pos"].distance_to(t["pos"]))
+		if nearest > Weapons.reach(int(p["weapon"])):
 			continue
 		var dir := Combat.aim_dir(p["pos"], targets)
 		if dir == Vector2.ZERO:
 			continue
 		p["fire_cd"] = Weapons.cooldown(p["weapon"], p["mods"])
-		_spawn_projectiles(p["pos"], dir, p["weapon"], p["mods"])
+		_spawn_projectiles(p["pos"], dir, p["weapon"], p["mods"], id)
 
 
 func _step_projectiles(delta: float) -> void:
@@ -306,12 +314,12 @@ func _step_projectiles(delta: float) -> void:
 			e["hp"] -= int(pr["dmg"])
 			expired.append(pid)
 			if e["hp"] <= 0:
-				killed.append(eid)
+				killed.append([eid, int(pr.get("owner", 0))])
 			break
 	for pid in expired:
 		projectiles.erase(pid)
-	for eid in killed:
-		_kill_enemy(eid)
+	for k in killed:
+		_kill_enemy(int(k[0]), int(k[1]))
 
 
 func _step_enemies(delta: float) -> void:
@@ -370,23 +378,30 @@ func _step_loot(delta: float) -> void:
 			removed.append(lid)
 			continue
 		l["ttl"] = ttl
-		var owner := _nearest_alive_player_id(l["pos"])
-		if owner == 0:
+		# M4.4：碎片归属击杀者；击杀者不在场/已倒地则回退到最近的存活玩家
+		var owner := int(l.get("owner", 0))
+		var target := 0
+		if owner != 0 and players.has(owner) and players[owner]["status"] == Combat.PLAYER_ALIVE:
+			target = owner
+		else:
+			target = _nearest_alive_player_id(l["pos"])
+		if target == 0:
 			continue
-		var p: Dictionary = players[owner]
+		var p: Dictionary = players[target]
 		var to_player: Vector2 = p["pos"] - l["pos"]
 		var d := to_player.length()
 		var pickup_r := Combat.PICKUP_RADIUS + float(p["mods"]["pickup_add"])
-		var magnet_r := Combat.LOOT_MAGNET_RADIUS + float(p["mods"]["pickup_add"])
 		if d <= pickup_r:
 			p["pickups"] += 1
-			gain_xp(Combat.loot_xp(int(l["kind"])))
+			gain_xp(target, Combat.loot_xp(int(l["kind"])))
 			var heal := int(p["mods"]["heal_add"])
 			if heal > 0:
 				p["hp"] = mini(p["hp"] + heal, Progression.max_hp(p["mods"]))
 			removed.append(lid)
-		elif d <= magnet_r:
-			l["pos"] = l["pos"] + to_player.normalized() * Combat.LOOT_MAGNET_SPEED * delta
+		else:
+			# M4.4：取消磁吸半径上限——碎片从任意距离飞向归属玩家
+			var magnet := Combat.LOOT_MAGNET_SPEED + float(p["mods"].get("magnet_speed_add", 0))
+			l["pos"] = l["pos"] + to_player.normalized() * magnet * delta
 	for lid in removed:
 		loot.erase(lid)
 
@@ -411,7 +426,9 @@ func _spawn_normal() -> void:
 	spawn_enemy(Rooms.clamp_inside(at, Combat.ENEMY_RADIUS))
 
 
-func _spawn_projectiles(pos: Vector2, dir: Vector2, weapon: int, mods: Dictionary) -> void:
+func _spawn_projectiles(
+	pos: Vector2, dir: Vector2, weapon: int, mods: Dictionary, owner: int
+) -> void:
 	var n := Weapons.projectile_count(weapon, mods)
 	var dmg := Weapons.damage(weapon, mods)
 	var spread := Weapons.spread(weapon)
@@ -430,10 +447,11 @@ func _spawn_projectiles(pos: Vector2, dir: Vector2, weapon: int, mods: Dictionar
 			"dmg": dmg,
 			"dir": d,
 			"kind": weapon,
+			"owner": owner,
 		}
 
 
-func _kill_enemy(eid: int) -> void:
+func _kill_enemy(eid: int, owner: int = 0) -> void:
 	if not enemies.has(eid):
 		return
 	var e: Dictionary = enemies[eid]
@@ -445,17 +463,17 @@ func _kill_enemy(eid: int) -> void:
 		boss_kills += 1
 	kills += 1
 	var loot_kind := Combat.LOOT_KIND_BIG if kind == Combat.ENEMY_KIND_BOSS else Combat.LOOT_KIND_XP
-	_add_loot(pos, loot_kind)
+	_add_loot(pos, loot_kind, owner)
 
 
-func _add_loot(pos: Vector2, kind: int) -> void:
+func _add_loot(pos: Vector2, kind: int, owner: int = 0) -> void:
 	## 有界掉落：先按硬上限淘汰最旧（实体 id 单调递增 → 最小 id 即最旧），再带 TTL 入池。
 	while loot.size() >= Combat.MAX_LOOT:
 		var keys := loot.keys()
 		keys.sort()
 		loot.erase(int(keys[0]))
 	var lid := _alloc_id()
-	loot[lid] = {"pos": pos, "kind": kind, "ttl": Combat.LOOT_TTL}
+	loot[lid] = {"pos": pos, "kind": kind, "owner": owner, "ttl": Combat.LOOT_TTL}
 
 
 func _check_run_over() -> void:
@@ -553,4 +571,6 @@ func _new_player() -> Dictionary:
 		"pickups": 0,
 		"weapon": Weapons.default_id(),
 		"mods": Progression.default_modifiers(),
+		"level": 1,
+		"xp": 0,
 	}

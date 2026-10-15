@@ -174,7 +174,7 @@ func _physics_process(delta: float) -> void:
 		# 本机渲染每物理帧刷新（60Hz），直连完整权威状态
 		world_state.emit(
 			_host.tick,
-			_host.meta(),
+			_host.meta(local_id),
 			_host.player_states(),
 			_host.enemy_states(),
 			_host.loot_states(),
@@ -214,19 +214,22 @@ func _offer_to_players() -> void:
 func _check_run_over() -> void:
 	if _host.run_over and not _run_over_sent:
 		_run_over_sent = true
-		var stats := _host.stats()
-		run_over.emit(_host.won, stats)
-		_rpc_run_over.rpc(
-			_host.won,
-			int(stats["kills"]),
-			int(stats["level"]),
-			int(stats["boss_kills"]),
-			float(stats["seconds"])
-		)
+		run_over.emit(_host.won, _host.stats(local_id))
+		for peer in _host.peer_ids():
+			if peer == 1:
+				continue
+			var stats := _host.stats(peer)
+			_rpc_run_over.rpc_id(
+				peer,
+				_host.won,
+				int(stats["kills"]),
+				int(stats["level"]),
+				int(stats["boss_kills"]),
+				float(stats["seconds"])
+			)
 
 
 func _send_snapshots() -> void:
-	var meta := _host.meta()
 	var players := _host.player_states()
 	var enemies := _host.enemy_states()
 	var loot := _host.loot_states()
@@ -235,6 +238,7 @@ func _send_snapshots() -> void:
 			continue  # 主机本地走 world_state 直连
 		if not _host.players.has(peer):
 			continue
+		var meta := _host.meta(peer)
 		var center: Vector2 = _host.players[peer]["pos"]
 		var culled_enemies := AoI.cull(center, AoI.AOI_RADIUS, enemies)
 		var culled_loot := AoI.cull(center, AoI.AOI_RADIUS, loot)

@@ -211,6 +211,9 @@ func _on_player_upgrade(player_id: int, card_id: int) -> void:
 
 
 func _on_run_over(won: bool, stats: Dictionary) -> void:
+	# M4.4：结算面板弹出时收起尚未选完的升级卡片，避免两层 UI 叠显
+	if _upgrade_menu != null:
+		_upgrade_menu.visible = false
 	if _runover_menu != null:
 		_runover_menu.show_result(won, stats)
 

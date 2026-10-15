@@ -1,5 +1,5 @@
 extends RefCounted
-## 成长系统纯逻辑（M3）：共享经验池 → 全队升级 → 每人独立抽卡。
+## 成长系统纯逻辑（M3/M4.4）：每人独立经验与等级 → 各自升级 → 每人独立抽卡。
 ## 主机唯一裁决；客户端只把选择回传。全部静态纯函数，无实例状态。
 
 const Combat := preload("res://sim/combat.gd")
@@ -10,7 +10,7 @@ const CARDS: Array = [
 	{"id": 0, "name": "锐利弹头", "damage_add": 4},
 	{"id": 1, "name": "速射", "cooldown_scale": 0.85},
 	{"id": 2, "name": "健壮", "max_hp_add": 25},
-	{"id": 3, "name": "磁力", "pickup_add": 30},
+	{"id": 3, "name": "磁力", "magnet_speed_add": 80},
 	{"id": 4, "name": "散射", "extra_projectiles": 1},
 	{"id": 5, "name": "回春", "heal_add": 3},
 	{"id": 6, "name": "换装·步枪", "weapon_set": 1},
@@ -31,6 +31,7 @@ static func default_modifiers() -> Dictionary:
 		"pickup_add": 0,
 		"extra_projectiles": 0,
 		"heal_add": 0,
+		"magnet_speed_add": 0,
 	}
 
 
