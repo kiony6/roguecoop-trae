@@ -6,10 +6,13 @@ extends Node
 signal player_joined(player_id: int)
 signal player_left(player_id: int)
 signal input_received(player_id: int)
-signal world_state(tick: int, meta: Dictionary, players: Array, enemies: Array, loot: Array)
+signal world_state(
+	tick: int, meta: Dictionary, players: Array, enemies: Array, loot: Array, projectiles: Array
+)
 signal upgrade_offer(choices: PackedInt32Array)
 signal player_upgrade(player_id: int, card_id: int)
 signal run_over(won: bool, stats: Dictionary)
+signal room_ready
 signal connected_ok(local_id: int)
 signal connection_failed
 signal disconnected
@@ -48,6 +51,14 @@ func is_host() -> bool:
 
 func is_client() -> bool:
 	return mode == Mode.CLIENT
+
+
+func room_walls() -> Array:
+	if mode == Mode.HOST:
+		return _host.room_walls
+	if mode == Mode.CLIENT:
+		return _client.room_walls
+	return []
 
 
 # ---------------- 主机 ----------------
@@ -166,7 +177,8 @@ func _physics_process(delta: float) -> void:
 			_host.meta(),
 			_host.player_states(),
 			_host.enemy_states(),
-			_host.loot_states()
+			_host.loot_states(),
+			_host.projectile_states()
 		)
 		if not _host.run_over:
 			_offer_to_players()
@@ -226,8 +238,10 @@ func _send_snapshots() -> void:
 		var center: Vector2 = _host.players[peer]["pos"]
 		var culled_enemies := AoI.cull(center, AoI.AOI_RADIUS, enemies)
 		var culled_loot := AoI.cull(center, AoI.AOI_RADIUS, loot)
+		var projs := _host.projectile_states()
+		var culled_proj := AoI.cull(center, AoI.AOI_RADIUS, projs)
 		var payload := Protocol.encode_snapshot(
-			_host.tick, meta, players, culled_enemies, culled_loot
+			_host.tick, meta, players, culled_enemies, culled_loot, culled_proj
 		)
 		_rpc_snapshot.rpc_id(peer, _host.tick, payload)
 	_host.snapshot_count += 1
@@ -240,6 +254,7 @@ func _on_peer_connected(id: int) -> void:
 	if mode != Mode.HOST:
 		return
 	_host.add_player(id)
+	_rpc_room.rpc_id(id, Protocol.encode_room(_host.room_walls))
 	player_joined.emit(id)
 	_broadcast_peer_list()
 
@@ -299,7 +314,9 @@ func _rpc_snapshot(_tick_in: int, payload: PackedByteArray) -> void:
 	_client.last_snapshot_tick = snap["tick"]
 	_client.last_meta = snap["meta"]
 	_client.last_players = snap["players"]
-	world_state.emit(snap["tick"], snap["meta"], snap["players"], snap["enemies"], snap["loot"])
+	world_state.emit(
+		snap["tick"], snap["meta"], snap["players"], snap["enemies"], snap["loot"], snap["projectiles"]
+	)
 
 
 @rpc("authority", "call_remote", "reliable", 0)
@@ -317,6 +334,14 @@ func _rpc_peer_list(ids: PackedInt32Array) -> void:
 		if not ids.has(id):
 			_known_peers.erase(id)
 			player_left.emit(id)
+
+
+@rpc("authority", "call_remote", "reliable", 0)
+func _rpc_room(payload: PackedByteArray) -> void:
+	if mode != Mode.CLIENT:
+		return
+	_client.room_walls = Protocol.decode_room(payload)
+	room_ready.emit()
 
 
 @rpc("authority", "call_remote", "reliable", 0)

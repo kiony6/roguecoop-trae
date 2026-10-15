@@ -7,6 +7,7 @@ var last_meta: Dictionary = {}
 var last_players: Array = []
 var pending_move := Vector2.ZERO
 var pending_buttons := 0
+var room_walls: Array = []
 
 
 func reset() -> void:
@@ -16,3 +17,4 @@ func reset() -> void:
 	last_players = []
 	pending_move = Vector2.ZERO
 	pending_buttons = 0
+	room_walls = []
