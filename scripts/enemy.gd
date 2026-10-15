@@ -42,7 +42,8 @@ func _physics_process(_delta: float) -> void:
 
 func _draw() -> void:
 	var radius := Combat.enemy_radius(kind)
-	var t := clampf(1.0 - float(_hp01) / 255.0, 0.0, 1.0)
+	var frac := clampf(float(_hp01) / 255.0, 0.0, 1.0)
+	var t := 1.0 - frac
 	var base := Color("6a3bb2") if kind == Combat.ENEMY_KIND_BOSS else Color("b23b3b")
 	var col := base.lerp(Color("ff8080"), t)
 	draw_circle(Vector2.ZERO, radius, col)
@@ -51,4 +52,4 @@ func _draw() -> void:
 		draw_arc(Vector2.ZERO, radius + 5.0, 0.0, TAU, 32, Color("e0b0ff"), 2.0)
 	var w := radius * 1.7
 	draw_rect(Rect2(-w * 0.5, -radius - 9.0, w, 3.0), Color(0, 0, 0, 0.5))
-	draw_rect(Rect2(-w * 0.5, -radius - 9.0, w * t, 3.0), Color("ffd93d"))
+	draw_rect(Rect2(-w * 0.5, -radius - 9.0, w * frac, 3.0), Color("ffd93d"))
