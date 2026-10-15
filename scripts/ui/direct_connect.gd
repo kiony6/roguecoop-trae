@@ -13,6 +13,10 @@ var _auto_join := false
 
 
 func _ready() -> void:
+	# 启动期「直达直连」意图若已由本页就地满足，则在此消费掉，
+	# 避免此后点「← 返回主菜单」又被主菜单弹回本页。
+	@warning_ignore("return_value_discarded")
+	Boot.take_auto_join_pending()
 	$BackButton.pressed.connect(_on_back_pressed)
 	$Panel/HostButton.pressed.connect(_on_host_pressed)
 	$Panel/JoinButton.pressed.connect(_on_join_pressed)
