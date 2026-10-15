@@ -26,6 +26,8 @@ const AoI := preload("res://net/aoi.gd")
 
 var mode: Mode = Mode.NONE
 var local_id := 0
+var dedicated := false
+var debug_latency_ms := 0  # 调试用单程人为延迟（毫秒），0 = 关闭；RTT ≈ 2×该值
 
 var _host := NetHostLogic.new()
 var _client := NetClientLogic.new()
@@ -33,6 +35,8 @@ var _send_accum := 0.0
 var _snap_accum := 0.0
 var _known_peers: Array = []
 var _run_over_sent := false
+var _input_queue: Array = []
+var _snap_queue: Array = []
 
 
 func _ready() -> void:
@@ -51,6 +55,16 @@ func is_host() -> bool:
 
 func is_client() -> bool:
 	return mode == Mode.CLIENT
+
+
+func set_debug_latency_ms(ms: int) -> void:
+	## 调试用单程人为延迟：上行在主机收到输入时入队、下行在客户端收到快照时入队。
+	debug_latency_ms = maxi(0, ms)
+
+
+func interp_delay_ms() -> float:
+	## 远端插值回放延迟：默认 100ms；开调试延迟时抬到「单程延迟 + 100ms」以覆盖整段延迟。
+	return 100.0 if debug_latency_ms <= 0 else float(debug_latency_ms) + 100.0
 
 
 func is_run_over() -> bool:
@@ -73,34 +87,44 @@ func room_walls() -> Array:
 # ---------------- 主机 ----------------
 
 
-func host_start(port: int) -> Error:
+func host_start(port: int, as_dedicated: bool = false, bind_ip: String = "") -> Error:
 	if mode != Mode.NONE:
 		return ERR_ALREADY_IN_USE
 	var peer := ENetMultiplayerPeer.new()
+	if not bind_ip.is_empty():
+		peer.set_bind_ip(bind_ip)
 	var err := peer.create_server(port, Protocol.MAX_PLAYERS - 1, 2)
 	if err != OK:
 		return err
 	multiplayer.multiplayer_peer = peer
-	_host.reset()
+	dedicated = as_dedicated
+	_host.reset(as_dedicated)
 	_known_peers.clear()
 	_run_over_sent = false
+	_input_queue.clear()
+	_snap_queue.clear()
 	mode = Mode.HOST
-	local_id = 1
+	local_id = 0 if as_dedicated else 1
 	_send_accum = 0.0
 	_snap_accum = 0.0
 	set_physics_process(true)
-	player_joined.emit(1)
+	if not as_dedicated:
+		player_joined.emit(1)
 	return OK
 
 
 func host_stop() -> void:
 	if mode != Mode.HOST:
 		return
+	var was_dedicated := dedicated
 	mode = Mode.NONE
 	set_physics_process(false)
 	multiplayer.multiplayer_peer = null
-	_host.reset()
+	_host.reset(was_dedicated)
+	dedicated = false
 	local_id = 0
+	_input_queue.clear()
+	_snap_queue.clear()
 
 
 # ---------------- 客户端 ----------------
@@ -175,37 +199,47 @@ func _read_buttons() -> int:
 
 func _physics_process(delta: float) -> void:
 	if mode == Mode.HOST:
-		# 主机本地玩家的输入在这里采样：不依赖场景树中是否恰好存在玩家节点
-		_host.local_move = _read_local_move()
-		_host.local_buttons = _read_buttons()
+		_drain_input_queue()
+		if not dedicated:
+			# 主机本地玩家的输入在这里采样：不依赖场景树中是否恰好存在玩家节点
+			_host.local_move = _read_local_move()
+			_host.local_buttons = _read_buttons()
 		if not _host.run_over:
 			_host.physics_step(delta)
-		# 本机渲染每物理帧刷新（60Hz），直连完整权威状态
-		world_state.emit(
-			_host.tick,
-			_host.meta(local_id),
-			_host.player_states(),
-			_host.enemy_states(),
-			_host.loot_states(),
-			_host.projectile_states()
-		)
+		if not dedicated:
+			# 本机渲染每物理帧刷新（60Hz），直连完整权威状态
+			world_state.emit(
+				_host.tick,
+				_host.meta(local_id),
+				_host.player_states(),
+				_host.enemy_states(),
+				_host.loot_states(),
+				_host.projectile_states()
+			)
 		if not _host.run_over:
+			# 升级候选只对真实对端下发（专用服务器没有 peer 1，逐 peer 走可靠 RPC）
 			_offer_to_players()
+		# M4.2：结算检测必须在门控外无条件执行，否则结算信号永不发出、物理永久停摆
 		_check_run_over()
 		_snap_accum += delta
 		if _snap_accum >= 1.0 / float(Protocol.SNAPSHOT_RATE):
 			_snap_accum = 0.0
 			_send_snapshots()
-	elif mode == Mode.CLIENT and local_id != 0 and not _client.run_over:
-		_send_accum += delta
-		if _send_accum >= 1.0 / float(Protocol.INPUT_RATE):
-			_send_accum = 0.0
-			_client.tick += 1
-			_rpc_input.rpc_id(
-				1,
-				_client.tick,
-				Protocol.encode_input(_client.pending_move, Vector2.RIGHT, _client.pending_buttons)
-			)
+	elif mode == Mode.CLIENT:
+		_drain_snap_queue()
+		# M4.5：结算后停止上报输入（仍继续应用快照，保持画面与冻结的权威状态一致）
+		if local_id != 0 and not _client.run_over:
+			_send_accum += delta
+			if _send_accum >= 1.0 / float(Protocol.INPUT_RATE):
+				_send_accum = 0.0
+				_client.tick += 1
+				_rpc_input.rpc_id(
+					1,
+					_client.tick,
+					Protocol.encode_input(
+						_client.pending_move, Vector2.RIGHT, _client.pending_buttons
+					)
+				)
 
 
 func _offer_to_players() -> void:
@@ -223,7 +257,13 @@ func _offer_to_players() -> void:
 func _check_run_over() -> void:
 	if _host.run_over and not _run_over_sent:
 		_run_over_sent = true
-		run_over.emit(_host.won, _host.stats(local_id))
+		# M5：专用服务器没有本地玩家（local_id=0），取接入的第一名客户端作为运维日志样本
+		var sample := local_id
+		if dedicated:
+			var ids := _host.peer_ids()
+			sample = int(ids[0]) if ids.size() > 0 else 0
+		var local_stats := _host.stats(sample) if _host.has_player(sample) else {}
+		run_over.emit(_host.won, local_stats)
 		for peer in _host.peer_ids():
 			if peer == 1:
 				continue
@@ -258,6 +298,53 @@ func _send_snapshots() -> void:
 		)
 		_rpc_snapshot.rpc_id(peer, _host.tick, payload)
 	_host.snapshot_count += 1
+
+
+func _drain_input_queue() -> void:
+	if _input_queue.is_empty():
+		return
+	var now := Time.get_ticks_msec()
+	var keep: Array = []
+	for it in _input_queue:
+		if int(it["due"]) <= now:
+			_apply_remote_input(int(it["sender"]), it["payload"])
+		else:
+			keep.append(it)
+	_input_queue = keep
+
+
+func _drain_snap_queue() -> void:
+	if _snap_queue.is_empty():
+		return
+	var now := Time.get_ticks_msec()
+	var keep: Array = []
+	for it in _snap_queue:
+		if int(it["due"]) <= now:
+			_apply_snapshot(it["payload"])
+		else:
+			keep.append(it)
+	_snap_queue = keep
+
+
+func _apply_remote_input(sender: int, payload: PackedByteArray) -> void:
+	var f := Protocol.decode_input(payload)
+	_host.set_remote_input(sender, f["move"], f["buttons"])
+	input_received.emit(sender)
+
+
+func _apply_snapshot(payload: PackedByteArray) -> void:
+	var snap := Protocol.decode_snapshot(payload)
+	_client.last_snapshot_tick = snap["tick"]
+	_client.last_meta = snap["meta"]
+	_client.last_players = snap["players"]
+	world_state.emit(
+		snap["tick"],
+		snap["meta"],
+		snap["players"],
+		snap["enemies"],
+		snap["loot"],
+		snap["projectiles"]
+	)
 
 
 # ---------------- 连接事件 ----------------
@@ -314,27 +401,22 @@ func _rpc_input(_tick_in: int, payload: PackedByteArray) -> void:
 		return
 	if not _host.has_player(sender):
 		return
-	var f := Protocol.decode_input(payload)
-	_host.set_remote_input(sender, f["move"], f["buttons"])
-	input_received.emit(sender)
+	if debug_latency_ms > 0:
+		_input_queue.append(
+			{"due": Time.get_ticks_msec() + debug_latency_ms, "payload": payload, "sender": sender}
+		)
+		return
+	_apply_remote_input(sender, payload)
 
 
 @rpc("authority", "call_remote", "unreliable_ordered", 1)
 func _rpc_snapshot(_tick_in: int, payload: PackedByteArray) -> void:
 	if mode != Mode.CLIENT:
 		return
-	var snap := Protocol.decode_snapshot(payload)
-	_client.last_snapshot_tick = snap["tick"]
-	_client.last_meta = snap["meta"]
-	_client.last_players = snap["players"]
-	world_state.emit(
-		snap["tick"],
-		snap["meta"],
-		snap["players"],
-		snap["enemies"],
-		snap["loot"],
-		snap["projectiles"]
-	)
+	if debug_latency_ms > 0:
+		_snap_queue.append({"due": Time.get_ticks_msec() + debug_latency_ms, "payload": payload})
+		return
+	_apply_snapshot(payload)
 
 
 @rpc("authority", "call_remote", "reliable", 0)
