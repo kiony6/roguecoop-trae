@@ -19,6 +19,8 @@ func _ready() -> void:
 			_port = int(a.substr(7))
 		elif a.begins_with("--bind="):
 			_bind = a.substr(7)
+		elif a.begins_with("--transport="):
+			Net.set_websocket(a.substr(12) == "ws")
 	Net.player_joined.connect(_on_joined)
 	Net.player_left.connect(_on_left)
 	Net.run_over.connect(_on_run_over)
@@ -32,7 +34,10 @@ func _start() -> void:
 		get_tree().quit(1)
 		return
 	print(
-		"[Dedicated] listening port=%d bind=%s" % [_port, "0.0.0.0" if _bind.is_empty() else _bind]
+		(
+			"[Dedicated] listening port=%d bind=%s transport=%s"
+			% [_port, "0.0.0.0" if _bind.is_empty() else _bind, "ws/tcp" if Net.transport_ws else "udp/enet"]
+		)
 	)
 
 

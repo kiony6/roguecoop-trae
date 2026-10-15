@@ -24,6 +24,8 @@ placeholder_text = "主机 IP"
 text = "25600"
 placeholder_text = "端口（UDP）"
 
+[node name="TransportOption" type="OptionButton" parent="Panel"]
+
 [node name="HostButton" type="Button" parent="Panel"]
 text = "建立主机"
 
