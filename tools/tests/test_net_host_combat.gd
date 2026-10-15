@@ -7,6 +7,9 @@ const Harness := preload("res://tools/tests/harness.gd")
 const NetHostLogic := preload("res://net/net_host.gd")
 const Combat := preload("res://sim/combat.gd")
 const Progression := preload("res://sim/progression.gd")
+const Weapons := preload("res://sim/weapons.gd")
+const Waves := preload("res://sim/waves.gd")
+const Rooms := preload("res://sim/rooms.gd")
 
 
 func run() -> int:
@@ -71,7 +74,11 @@ func run() -> int:
 	t.eq(h5.pending_offer(1).size(), 0, "同一升级的候选只下发一次")
 	t.check(not h5.apply_choice(1, 999), "不在候选中的卡被拒绝")
 	t.check(h5.apply_choice(1, int(offers[0])), "候选中的卡被接受")
-	t.check(h5.players[1]["mods"] != Progression.default_modifiers(), "选卡后修饰发生变化")
+	var changed: bool = (
+		h5.players[1]["mods"] != Progression.default_modifiers()
+		or int(h5.players[1]["weapon"]) != Weapons.default_id()
+	)
+	t.check(changed, "选卡后玩家状态发生变化（修饰或武器）")
 	t.eq(h5.apply_choice(1, int(offers[0])), false, "同一张卡不能重复选")
 
 	# (6) 倒地：无人救援时被打入倒地状态
@@ -128,5 +135,40 @@ func run() -> int:
 	h11.reset()
 	t.eq(h11.meta()["level"], 1, "初始等级 1")
 	t.check(h11.stats().has("seconds"), "stats 含存活时长")
+
+	# (12) 武器：霰弹枪一次开火产生多枚弹丸，且可导出弹丸状态
+	var h12 := NetHostLogic.new()
+	h12.reset()
+	h12.spawn_interval = 9999.0
+	h12.spawn_enemy(Vector2(120, 0))
+	h12.players[1]["weapon"] = Weapons.KIND_SHOTGUN
+	h12.local_buttons = 1
+	h12.physics_step(0.016)
+	var want := Weapons.projectile_count(Weapons.KIND_SHOTGUN, h12.players[1]["mods"])
+	t.eq(h12.projectiles.size(), want, "霰弹枪一次开火产生多枚弹丸")
+	t.eq(h12.projectile_states().size(), want, "projectile_states 与内部弹丸数一致")
+	var st: Array = h12.projectile_states()
+	t.check(st[0].has("dir") and st[0].has("kind"), "弹丸状态含 dir/kind")
+
+	# (13) 波次：存活时长推进档位并缩短刷新间隔
+	var h13 := NetHostLogic.new()
+	h13.reset()
+	h13.spawn_interval = 9999.0
+	h13.elapsed = Waves.WAVE_DURATION * 2.0 + 1.0
+	h13.physics_step(0.016)
+	t.eq(h13.wave, 3, "存活时长推进波次到 3")
+	t.check(h13.spawn_interval < Combat.SPAWN_INTERVAL, "高波次刷新间隔更短")
+
+	# (14) 墙体：玩家被墙挡住不再靠近
+	var h14 := NetHostLogic.new()
+	h14.reset()
+	h14.spawn_interval = 9999.0
+	h14.room_walls = [Rect2(60.0, -50.0, 40.0, 100.0)]
+	h14.local_move = Vector2.RIGHT
+	for _i in range(120):
+		h14.physics_step(0.016)
+	var limit := 60.0 - Combat.PLAYER_RADIUS + 0.001
+	t.check(h14.players[1]["pos"].x <= limit, "玩家被墙挡住不再靠近")
+	t.check(h14.players[1]["pos"].x > 0.0, "玩家确实向右移动了一段")
 
 	return t.report("NetHostCombat")

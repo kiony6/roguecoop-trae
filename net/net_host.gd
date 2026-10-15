@@ -6,12 +6,17 @@ const Movement := preload("res://sim/movement.gd")
 const Combat := preload("res://sim/combat.gd")
 const EnemyAI := preload("res://sim/enemy_ai.gd")
 const Progression := preload("res://sim/progression.gd")
+const Weapons := preload("res://sim/weapons.gd")
+const Rooms := preload("res://sim/rooms.gd")
+const Waves := preload("res://sim/waves.gd")
 
 var tick := 0
 var snapshot_count := 0
 var local_move := Vector2.ZERO
 var local_buttons := 0
-var spawn_interval := Combat.SPAWN_INTERVAL
+var spawn_interval := Waves.spawn_interval(1)
+var wave := 1
+var room_walls: Array = []
 
 # —— 队伍成长与结算 ——
 var level := 1
@@ -42,7 +47,9 @@ func reset() -> void:
 	snapshot_count = 0
 	local_move = Vector2.ZERO
 	local_buttons = 0
-	spawn_interval = Combat.SPAWN_INTERVAL
+	spawn_interval = Waves.spawn_interval(1)
+	wave = 1
+	room_walls = Rooms.generate(20261015)
 	level = 1
 	xp = 0
 	kills = 0
@@ -87,7 +94,7 @@ func spawn_enemy(pos: Vector2, kind: int = Combat.ENEMY_KIND_NORMAL) -> int:
 	var eid := _alloc_id()
 	enemies[eid] = {
 		"pos": pos,
-		"hp": Combat.enemy_max_hp(kind),
+		"hp": Waves.enemy_hp(kind, wave),
 		"kind": kind,
 		"touch_cd": 0.0,
 	}
@@ -97,9 +104,8 @@ func spawn_enemy(pos: Vector2, kind: int = Combat.ENEMY_KIND_NORMAL) -> int:
 func spawn_boss() -> int:
 	var anchor := _random_player_pos()
 	var angle := _rng.randf_range(0.0, TAU)
-	var eid := spawn_enemy(
-		anchor + Vector2.RIGHT.rotated(angle) * Combat.SPAWN_RADIUS, Combat.ENEMY_KIND_BOSS
-	)
+	var at := anchor + Vector2.RIGHT.rotated(angle) * Combat.SPAWN_RADIUS
+	var eid := spawn_enemy(Rooms.clamp_inside(at, Combat.BOSS_RADIUS), Combat.ENEMY_KIND_BOSS)
 	boss_id = eid
 	return eid
 
@@ -109,6 +115,10 @@ func physics_step(delta: float) -> void:
 		return
 	tick += 1
 	elapsed += delta
+	var w := Waves.wave_index(elapsed)
+	if w != wave:
+		wave = w
+		spawn_interval = Waves.spawn_interval(w)
 	if players.has(1):
 		players[1]["move"] = local_move
 		players[1]["buttons"] = local_buttons
@@ -123,7 +133,7 @@ func physics_step(delta: float) -> void:
 
 
 func meta() -> Dictionary:
-	return {"level": level, "xp": xp, "kills": kills, "boss_kills": boss_kills}
+	return {"level": level, "xp": xp, "kills": kills, "boss_kills": boss_kills, "wave": wave}
 
 
 func stats() -> Dictionary:
@@ -143,6 +153,7 @@ func player_states() -> Array:
 					"hp": p["hp"],
 					"status": p["status"],
 					"revive01": _revive01(p),
+					"weapon": p["weapon"],
 				}
 			)
 		)
@@ -170,6 +181,14 @@ func loot_states() -> Array:
 	var out: Array = []
 	for id in loot:
 		out.append({"id": id, "pos": loot[id]["pos"], "kind": loot[id]["kind"]})
+	return out
+
+
+func projectile_states() -> Array:
+	var out: Array = []
+	for id in projectiles:
+		var pr: Dictionary = projectiles[id]
+		out.append({"id": id, "pos": pr["pos"], "dir": pr["dir"], "kind": pr["kind"]})
 	return out
 
 
@@ -221,6 +240,8 @@ func apply_choice(id: int, card_id: int) -> bool:
 	p["mods"] = Progression.apply_card(p["mods"], card)
 	if card.has("max_hp_add"):
 		p["hp"] = mini(p["hp"] + int(card["max_hp_add"]), Progression.max_hp(p["mods"]))
+	if card.has("weapon_set"):
+		p["weapon"] = int(card["weapon_set"])
 	_offer.erase(id)
 	_offer_sent.erase(id)
 	return true
@@ -243,7 +264,7 @@ func _step_players(delta: float) -> void:
 		p["fire_cd"] = maxf(0.0, p["fire_cd"] - delta)
 		if p["status"] != Combat.PLAYER_ALIVE:
 			continue
-		p["pos"] = Movement.step(p["pos"], p["move"], delta)
+		p["pos"] = Movement.step(p["pos"], p["move"], delta, Movement.SPEED, room_walls)
 
 
 func _step_firing() -> void:
@@ -259,8 +280,8 @@ func _step_firing() -> void:
 		var dir := Combat.aim_dir(p["pos"], targets)
 		if dir == Vector2.ZERO:
 			continue
-		p["fire_cd"] = Combat.FIRE_COOLDOWN * float(p["mods"]["cooldown_scale"])
-		_spawn_projectiles(p["pos"], dir, p["mods"])
+		p["fire_cd"] = Weapons.cooldown(p["weapon"], p["mods"])
+		_spawn_projectiles(p["pos"], dir, p["weapon"], p["mods"])
 
 
 func _step_projectiles(delta: float) -> void:
@@ -276,7 +297,8 @@ func _step_projectiles(delta: float) -> void:
 		for eid in enemies:
 			var e: Dictionary = enemies[eid]
 			var radius := Combat.enemy_radius(e["kind"])
-			var hit := Combat.circle_hit(pr["pos"], Combat.PROJECTILE_RADIUS, e["pos"], radius)
+			var proj_r := Weapons.radius(pr["kind"])
+			var hit := Combat.circle_hit(pr["pos"], proj_r, e["pos"], radius)
 			if not hit:
 				continue
 			e["hp"] -= int(pr["dmg"])
@@ -296,7 +318,7 @@ func _step_enemies(delta: float) -> void:
 		var e: Dictionary = enemies[eid]
 		var kind: int = e["kind"]
 		var dir := EnemyAI.chase_dir(e["pos"], targets)
-		e["pos"] = EnemyAI.step(e["pos"], dir, delta, Combat.enemy_speed(kind))
+		e["pos"] = EnemyAI.step(e["pos"], dir, delta, Waves.enemy_speed(kind, wave))
 		e["touch_cd"] = maxf(0.0, e["touch_cd"] - delta)
 		if e["touch_cd"] > 0.0:
 			continue
@@ -370,7 +392,7 @@ func _step_loot(delta: float) -> void:
 
 func _step_spawner(delta: float) -> void:
 	_spawn_accum += delta
-	if _spawn_accum >= spawn_interval and enemies.size() < Combat.MAX_ENEMIES:
+	if _spawn_accum >= spawn_interval and enemies.size() < Waves.max_enemies(wave):
 		_spawn_accum = 0.0
 		_spawn_normal()
 	if kills >= _next_boss_at and boss_id == 0 and not players.is_empty():
@@ -384,22 +406,29 @@ func _step_spawner(delta: float) -> void:
 func _spawn_normal() -> void:
 	var anchor := _random_player_pos()
 	var angle := _rng.randf_range(0.0, TAU)
-	spawn_enemy(anchor + Vector2.RIGHT.rotated(angle) * Combat.SPAWN_RADIUS)
+	var at := anchor + Vector2.RIGHT.rotated(angle) * Combat.SPAWN_RADIUS
+	spawn_enemy(Rooms.clamp_inside(at, Combat.ENEMY_RADIUS))
 
 
-func _spawn_projectiles(pos: Vector2, dir: Vector2, mods: Dictionary) -> void:
-	var n := 1 + int(mods.get("extra_projectiles", 0))
-	var dmg := Combat.PROJECTILE_DAMAGE + int(mods.get("damage_add", 0))
-	var spread := 0.12
+func _spawn_projectiles(pos: Vector2, dir: Vector2, weapon: int, mods: Dictionary) -> void:
+	var n := Weapons.projectile_count(weapon, mods)
+	var dmg := Weapons.damage(weapon, mods)
+	var spread := Weapons.spread(weapon)
+	var speed := Weapons.speed(weapon)
+	var ttl := Weapons.ttl(weapon)
 	for i in n:
+		if projectiles.size() >= Weapons.MAX_PROJECTILES:
+			break
 		var off := (float(i) - float(n - 1) * 0.5) * spread
 		var d := dir.rotated(off)
 		var pid := _alloc_id()
 		projectiles[pid] = {
 			"pos": pos,
-			"vel": d * Combat.PROJECTILE_SPEED,
-			"ttl": Combat.PROJECTILE_TTL,
+			"vel": d * speed,
+			"ttl": ttl,
 			"dmg": dmg,
+			"dir": d,
+			"kind": weapon,
 		}
 
 
@@ -506,5 +535,6 @@ func _new_player() -> Dictionary:
 		"down_timer": 0.0,
 		"revive_progress": 0.0,
 		"pickups": 0,
+		"weapon": Weapons.default_id(),
 		"mods": Progression.default_modifiers(),
 	}
