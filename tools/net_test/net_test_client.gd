@@ -30,6 +30,7 @@ var _no_phantom := true
 var _self_pos := Vector2.ZERO
 var _have_self := false
 var _nearest_enemy := INF
+var _wave_seen := false
 
 
 func _ready() -> void:
@@ -82,6 +83,9 @@ func _on_state(
 		_no_phantom = false  # 专用模式下若仍有第二个玩家 = 幽灵玩家仍在
 	if int(meta.get("level", 1)) >= 2:
 		_level_seen = true
+	# M5.3：取默认值 0 而非 1——v1 服务端根本不传 wave，v2 才成立，故这是真判别器
+	if int(meta.get("wave", 0)) >= 1:
+		_wave_seen = true
 	# M4：客户端收到含弹丸的快照，且已收到主机可靠下发的房间（_rpc_room）
 	if not projectiles.is_empty():
 		_proj_seen = true
@@ -123,6 +127,7 @@ func _process(delta: float) -> void:
 			and _enemy_seen
 			and _loot_seen
 			and _no_phantom
+			and _wave_seen
 		)
 	else:
 		ok = (
@@ -137,6 +142,7 @@ func _process(delta: float) -> void:
 			and _status_seen
 			and _proj_seen
 			and _room_ok
+			and _wave_seen
 		)
 	if ok:
 		print(
@@ -144,7 +150,7 @@ func _process(delta: float) -> void:
 				(
 					"[NetTest-Client] PASS local_id=%d snapshots=%d two_players=%d moved=1 "
 					+ "enemy_seen=1 loot_seen=1 level_seen=%d status_seen=%d proj_seen=%d "
-					+ "room_ok=%d solo=%d phantom_free=%d"
+					+ "room_ok=%d solo=%d phantom_free=%d wave_seen=%d"
 				)
 				% [
 					Net.local_id,
@@ -156,6 +162,7 @@ func _process(delta: float) -> void:
 					1 if _room_ok else 0,
 					1 if _solo else 0,
 					1 if _no_phantom else 0,
+					1 if _wave_seen else 0,
 				]
 			)
 		)
@@ -165,7 +172,8 @@ func _process(delta: float) -> void:
 			(
 				(
 					"[NetTest-Client] FAIL timeout connected=%s snapshots=%d two=%s self=%s "
-					+ "moved=%s eseen=%s lseen=%s level=%s status=%s proj=%s room=%s solo=%s phantom=%s"
+					+ "moved=%s eseen=%s lseen=%s level=%s status=%s proj=%s room=%s solo=%s "
+					+ "phantom=%s wave=%s"
 				)
 				% [
 					_connected,
@@ -181,6 +189,7 @@ func _process(delta: float) -> void:
 					_room_ok,
 					_solo,
 					_no_phantom,
+					_wave_seen,
 				]
 			)
 		)

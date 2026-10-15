@@ -9,7 +9,7 @@ func run() -> int:
 	var t := Harness.new()
 	var big_id := 1420896317
 
-	var meta: Dictionary = {"level": 3, "xp": 7, "kills": 42}
+	var meta: Dictionary = {"level": 3, "xp": 7, "kills": 42, "wave": 5}
 	var players: Array = [
 		{"id": 1, "pos": Vector2(10.5, -20.25), "hp": 100, "status": 0, "revive01": 0, "weapon": 0},
 		{
@@ -33,13 +33,14 @@ func run() -> int:
 
 	var bytes := Protocol.encode_snapshot(42, meta, players, enemies, loot, projectiles)
 	t.eq(bytes.size(), Protocol.snapshot_size(2, 1, 1, 1), "长度 = snapshot_size(2,1,1,1)")
-	t.eq(bytes.size(), 87, "长度硬校验 = 13 + 2*16 + 14 + 13 + 15 = 87")
+	t.eq(bytes.size(), 88, "长度硬校验 = 14 + 2*16 + 14 + 13 + 15 = 88")
 
 	var d := Protocol.decode_snapshot(bytes)
 	t.eq(d["tick"], 42, "tick 往返")
 	t.eq(d["meta"]["level"], 3, "level 往返")
 	t.eq(d["meta"]["xp"], 7, "xp 往返")
 	t.eq(d["meta"]["kills"], 42, "kills 往返")
+	t.eq(d["meta"]["wave"], 5, "wave 往返（快照头 u8）")
 
 	t.eq(d["players"].size(), 2, "玩家数往返")
 	t.eq(d["players"][0]["id"], 1, "玩家 id[0] 往返")
@@ -72,7 +73,7 @@ func run() -> int:
 	t.eq(empty["enemies"].size(), 0, "空快照敌人数 = 0")
 	t.eq(empty["loot"].size(), 0, "空快照掉落数 = 0")
 	t.eq(empty["projectiles"].size(), 0, "空快照弹丸数 = 0")
-	t.eq(Protocol.encode_snapshot(7, {}, []).size(), 13, "空快照长度 = HEADER_BYTES")
+	t.eq(Protocol.encode_snapshot(7, {}, []).size(), 14, "空快照长度 = HEADER_BYTES")
 
 	var rb := Protocol.encode_room([Rect2(10.0, -20.0, 30.0, 40.0)])
 	t.eq(rb.size(), 17, "单墙编码 1 + 16 = 17 字节")

@@ -2,7 +2,7 @@ extends RefCounted
 ## 网络协议常量与二进制编解码（M4）。
 ## 全部静态方法，无实例状态。
 ## 输入帧：5 字节。
-## 快照头：u32 tick | u8 level | u16 xp | u16 kills | u8 pc | u8 ec | u8 lc | u8 prc = 13 字节
+## 快照头：u32 tick | u8 level | u16 xp | u16 kills | u8 pc | u8 wave | u8 ec | u8 lc | u8 prc = 14 字节
 ## 玩家段：u32 id | f32 x | f32 y | u8 hp | u8 status | u8 revive01 | u8 weapon = 16 字节
 ## 敌人段：u32 id | f32 x | f32 y | u8 hp01 | u8 kind = 14 字节
 ## 掉落段：u32 id | f32 x | f32 y | u8 kind = 13 字节
@@ -10,7 +10,7 @@ extends RefCounted
 ## 房间：u8 wc | wc*(f32 x | f32 y | f32 w | f32 h) = 1 + 16*wc 字节
 ## 注意：ec/lc/prc 三个计数字节在布局上位于各自段之前（ec 紧接玩家段之后）。
 
-const PROTOCOL_VERSION := 1
+const PROTOCOL_VERSION := 2
 const DEFAULT_PORT := 25600
 const MAX_PLAYERS := 4  # 协议上限（实际按 2 人验收）
 const INPUT_RATE := 30  # 客户端输入上报 Hz
@@ -19,7 +19,7 @@ const CH_CONTROL := 0  # 可靠通道
 const CH_DATA := 1  # 不可靠有序通道
 
 const INPUT_BYTES := 5
-const HEADER_BYTES := 13
+const HEADER_BYTES := 14
 const PLAYER_BYTES := 16
 const ENEMY_BYTES := 14
 const LOOT_BYTES := 13
@@ -51,7 +51,7 @@ static func decode_input(b: PackedByteArray) -> Dictionary:
 
 
 # ---------------- 快照 ----------------
-# 布局: u32 tick | u8 level | u16 xp | u16 kills | u8 pc
+# 布局: u32 tick | u8 level | u16 xp | u16 kills | u8 pc | u8 wave
 #     | pc*(u32 id | f32 x | f32 y | u8 hp | u8 status | u8 revive01 | u8 weapon)
 #     | u8 ec | ec*(u32 id | f32 x | f32 y | u8 hp01 | u8 kind)
 #     | u8 lc | lc*(u32 id | f32 x | f32 y | u8 kind)
@@ -74,7 +74,8 @@ static func encode_snapshot(
 	b.encode_u16(5, int(meta.get("xp", 0)))
 	b.encode_u16(7, int(meta.get("kills", 0)))
 	b[9] = players.size()
-	var o := 10
+	b[10] = int(meta.get("wave", 1)) & 0xFF
+	var o := 11
 	for p in players:
 		b.encode_u32(o, int(p["id"]))
 		b.encode_float(o + 4, float(p["pos"].x))
@@ -121,10 +122,11 @@ static func decode_snapshot(b: PackedByteArray) -> Dictionary:
 		"level": b[4],
 		"xp": b.decode_u16(5),
 		"kills": b.decode_u16(7),
+		"wave": b[10],
 	}
 	var players: Array = []
 	var pc: int = b[9]
-	var o := 10
+	var o := 11
 	for _i in pc:
 		if o + PLAYER_BYTES > b.size():
 			break
