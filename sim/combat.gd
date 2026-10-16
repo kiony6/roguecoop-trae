@@ -41,6 +41,38 @@ const LOOT_KIND_BIG := 1  # Boss 大碎片
 const XP_PER_SHARD := 5
 const XP_PER_BIG := 25
 
+# —— 子项目 5：技能体系常量的落地部分（只加不改，保证既有测试零回归）——
+const LOOT_KIND_BYTE := 2  # 字节币：技能节点生成/消耗的资源型掉落
+const XP_PER_BYTE := 3  # 拾取字节币的基础经验
+const BYTE_SHIELD := 30  # 「防火墙」单层护盾吸收量
+const BYTE_SHIELD_INTERVAL := 6.0  # 「防火墙」护盾生成周期
+const DRAIN_HEAL := 3  # 「吸血脉冲」每次命中回血量
+const SUMMON_TTL := 12.0  # 「傀儡召唤」僚机存活秒数
+const SUMMON_DAMAGE := 10  # 「傀儡召唤」僚机伤害
+
+# —— 子项目 5：动态特效种类（仅走新增 FX RPC 传整数，不改任何二进制协议）——
+const FX_HIT := 0  # 命中火花
+const FX_CHAIN := 1  # 电弧折线
+const FX_BURST := 2  # 爆裂环
+const FX_PULSE := 3  # 同心波纹
+const FX_NUKE := 4  # 核打击白闪 + 冲击环
+const FX_LASER := 5  # 激光亮束
+const FX_FROST := 6  # 冰霜锥
+const FX_BURN := 7  # 灼烧焰
+const FX_SHIELD := 8  # 护盾罩
+const FX_DRAIN := 9  # 吸血连线
+const FX_COIN := 10  # 字节币生成/拾取
+const FX_LEVELUP := 11  # 升级光柱
+const FX_REACTION := 12  # 元素反应爆闪
+const FX_SPIKE := 13  # 尖刺锥（尖刺数据包）
+const FX_CHIP := 14  # 芯片方格（芯片数据包）
+const FX_BUG := 15  # BUG 腐蚀泡（BUG 机制）
+const FX_NULL := 16  # 空指针十字镖（空指针 / 最弱协议处决）
+const FX_SPIN := 17  # 旋转数据包
+const FX_GIGA := 18  # 千兆攻冲击（超大范围）
+const FX_FAULT := 19  # 测试故障扫描线
+const FX_MAX := 20  # 特效种类数（供设置项遍历/单测断言）
+
 # —— M3：倒地与救援 ——
 # M4.3：去掉流血永久阵亡——只要还有存活队友，倒地者可无限期/无限次被救起。
 const PLAYER_ALIVE := 0
@@ -94,4 +126,8 @@ static func enemy_touch_interval(kind: int) -> float:
 
 
 static func loot_xp(kind: int) -> int:
-	return XP_PER_BIG if kind == LOOT_KIND_BIG else XP_PER_SHARD
+	if kind == LOOT_KIND_BIG:
+		return XP_PER_BIG
+	if kind == LOOT_KIND_BYTE:
+		return XP_PER_BYTE
+	return XP_PER_SHARD

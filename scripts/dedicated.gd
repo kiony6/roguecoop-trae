@@ -7,6 +7,8 @@ extends Node
 const Protocol := preload("res://net/protocol.gd")
 
 const AccountServerLib := preload("res://net/account_server.gd")
+const ScoreBoardLib := preload("res://net/score_board.gd")
+const Levels := preload("res://sim/levels.gd")
 
 const DEFAULT_DATA_PATH := "user://accounts.json"
 
@@ -16,7 +18,10 @@ var _port := Protocol.DEFAULT_PORT
 var _bind := ""
 var _data := DEFAULT_DATA_PATH
 var _mode := "game"  # "game"（默认，既有单房间专服）或 "lobby"（大厅多房间，M6.3）
+var _level_id := Levels.DEFAULT_LEVEL  # 仅 game 模式：CLI 覆盖关卡
+var _difficulty_id := Levels.DEFAULT_DIFFICULTY  # 仅 game 模式：CLI 覆盖难度
 var _accounts = null
+var _scores = null
 var _restarting := false
 
 
@@ -32,9 +37,15 @@ func _ready() -> void:
 			Net.set_websocket(a.substr(12) == "ws")
 		elif a.begins_with("--data="):
 			_data = a.substr(7)
+		elif a.begins_with("--level="):
+			_level_id = int(a.substr(8))
+		elif a.begins_with("--difficulty="):
+			_difficulty_id = int(a.substr(13))
 	_accounts = AccountServerLib.new(_data)
 	_accounts.load_from_disk()
 	Net.enable_accounts(_accounts)
+	_scores = ScoreBoardLib.new()
+	Net.enable_scores(_scores)
 	Net.account_registered.connect(_on_registered)
 	Net.account_session_closed.connect(_on_session_closed)
 	Net.player_joined.connect(_on_joined)
@@ -54,6 +65,7 @@ func _start() -> void:
 		printerr("[Dedicated] FAIL start port=%d err=%d" % [_port, err])
 		get_tree().quit(1)
 		return
+	Net.set_host_run_config(_level_id, _difficulty_id)
 	print(
 		(
 			"[Dedicated] listening port=%d bind=%s transport=%s accounts=%d"

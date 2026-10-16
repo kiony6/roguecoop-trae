@@ -30,38 +30,35 @@ horizontal_alignment = 1
 
 [node name="Scope" type="Label" parent="Center/Box"]
 theme_type_variation = &"Caption"
-text = "单人历史最佳榜 · 指标：最高到达波次（并列比击杀）"
 horizontal_alignment = 1
+
+[node name="BoardRow" type="HBoxContainer" parent="Center/Box"]
+alignment = 1
+theme_override_constants/separation = 12
+
+[node name="WaveBoardButton" type="Button" parent="Center/Box/BoardRow"]
+theme_type_variation = &"PrimaryButton"
+text = "波次榜"
+
+[node name="SkillBoardButton" type="Button" parent="Center/Box/BoardRow"]
+theme_type_variation = &"TextButton"
+text = "技能榜"
+
+[node name="DiffRow" type="HBoxContainer" parent="Center/Box"]
+alignment = 1
+theme_override_constants/separation = 8
 
 [node name="Table" type="GridContainer" parent="Center/Box"]
 columns = 6
 theme_override_constants/h_separation = 32
 theme_override_constants/v_separation = 8
 
-[node name="RankHeader" type="Label" parent="Center/Box/Table"]
-text = "排名"
-
-[node name="PlayerHeader" type="Label" parent="Center/Box/Table"]
-text = "玩家"
-
-[node name="WaveHeader" type="Label" parent="Center/Box/Table"]
-text = "最高波次"
-
-[node name="KillsHeader" type="Label" parent="Center/Box/Table"]
-text = "击杀"
-
-[node name="TimeHeader" type="Label" parent="Center/Box/Table"]
-text = "存活时长"
-
-[node name="BossHeader" type="Label" parent="Center/Box/Table"]
-text = "Boss数"
-
 [node name="Empty" type="Label" parent="Center/Box"]
 theme_type_variation = &"Caption"
-text = "暂无战绩（排行榜将于子项目 4 上线）"
+text = "暂无战绩"
 horizontal_alignment = 1
 
 [node name="Footnote" type="Label" parent="Center/Box"]
 theme_type_variation = &"Caption"
-text = "占位页：真实功能见子项目 4"
+text = "仅统计经「联机大厅」的在线局"
 horizontal_alignment = 1

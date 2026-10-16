@@ -27,6 +27,11 @@ const OP_REGISTER := 0
 const OP_LOGIN := 1
 const OP_LOGOUT := 2
 
+# 榜单分派值（M7，同样只是控制通道分派值，不进任何二进制帧）
+const BOARD_WAVE := 0  # 波次榜
+const BOARD_SKILL := 1  # 技能榜
+const BOARD_COUNT := 2
+
 const INPUT_BYTES := 5
 const HEADER_BYTES := 14
 const PLAYER_BYTES := 16

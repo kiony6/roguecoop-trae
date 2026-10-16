@@ -6,12 +6,17 @@ extends Control
 func _ready() -> void:
 	Account.disconnect_lobby()  # 偏离 6：返回主菜单即断开大厅，主菜单恒为未登录
 	$Center/Box/LobbyButton.pressed.connect(_on_lobby_pressed)
+	$Center/Box/Links/SkillTreeButton.pressed.connect(_on_skill_tree_pressed)
 	$Center/Box/Links/LeaderboardButton.pressed.connect(_on_leaderboard_pressed)
 	$Center/Box/Links/SettingsButton.pressed.connect(_on_settings_pressed)
 
 
 func _on_lobby_pressed() -> void:
 	get_tree().change_scene_to_file("res://scenes/ui/login.tscn")
+
+
+func _on_skill_tree_pressed() -> void:
+	get_tree().change_scene_to_file("res://scenes/ui/skill_tree.tscn")
 
 
 func _on_leaderboard_pressed() -> void:

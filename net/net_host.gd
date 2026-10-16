@@ -1,4 +1,4 @@
-extends RefCounted
+extends RefCounted  # gdlint:ignore=max-public-methods
 ## 主机权威模拟（纯逻辑，不含传输）。由 autoload Net 驱动。
 ## M3：在 M2 战斗之上叠加每人独立经验与等级+每人独立选卡、倒地/救援/阵亡、Boss 与结算判定。
 
@@ -9,7 +9,12 @@ const Progression := preload("res://sim/progression.gd")
 const Weapons := preload("res://sim/weapons.gd")
 const Rooms := preload("res://sim/rooms.gd")
 const Waves := preload("res://sim/waves.gd")
+const Levels := preload("res://sim/levels.gd")
+const Skills := preload("res://sim/skills.gd")
+const SkillRuntime := preload("res://sim/skill_runtime.gd")
 const IDLE_RESET_SECONDS := 10.0  # 空场（无人接入）持续这么久且上一局被玩过 → 整局状态归零
+const MAX_FX_EVENTS := 64  # 单帧待广播特效上限（防刷屏/防累积）
+const MAX_SKILL_EVENTS := 64  # 单帧待处理技能事件上限（防爆发拖垮主机）
 
 var tick := 0
 var snapshot_count := 0
@@ -26,6 +31,8 @@ var elapsed := 0.0
 var run_over := false
 var won := false
 var boss_id := 0
+var level_id := Levels.DEFAULT_LEVEL  # 关卡（区域）：只影响配色/元素偏向/曲线覆盖
+var difficulty_id := Levels.DEFAULT_DIFFICULTY  # 难度档位：默认「普通」= 原始数值，零回归
 
 var players := {}  # id -> {pos, move, buttons, hp, status, fire_cd, invuln,
 # revive_progress, pickups, mods, level, xp}
@@ -34,6 +41,9 @@ var loot := {}  # id -> {pos, kind, owner, ttl}
 var projectiles := {}  # id -> {pos, vel, ttl, dmg, owner}
 var idle_resets := 0  # 累计「空场超时归零」次数，供运维日志观测
 var idle_reset_seconds := 0.0  # 最近一次复位时的空置时长
+var fx_events: Array = []  # 本帧产生的特效事件（kind/pos/dir/radius），由 Net 取走后广播
+
+var _events: Array = []  # 本帧待处理的技能触发事件（player/event/pos）
 
 var _next_id := 1
 var _spawn_accum := 0.0
@@ -52,8 +62,8 @@ func reset(dedicated: bool = false, seed_value: int = 20261015) -> void:
 	snapshot_count = 0
 	local_move = Vector2.ZERO
 	local_buttons = 0
-	spawn_interval = Waves.spawn_interval(1)
-	wave = 1
+	wave = Levels.wave_of(level_id, difficulty_id, 0.0)
+	spawn_interval = Levels.spawn_interval(level_id, difficulty_id, wave)
 	room_walls = Rooms.generate(seed_value)
 	kills = 0
 	boss_kills = 0
@@ -65,14 +75,27 @@ func reset(dedicated: bool = false, seed_value: int = 20261015) -> void:
 	enemies = {}
 	loot = {}
 	projectiles = {}
+	fx_events = []
+	_events = []
 	_next_id = 1
 	_spawn_accum = 0.0
-	_next_boss_at = Combat.BOSS_EVERY_KILLS
+	_next_boss_at = Levels.boss_every_kills(difficulty_id)
 	_offer = {}
 	_offer_sent = {}
 	_rng.seed = seed_value
 	_dedicated = dedicated
 	_idle_seconds = 0.0
+
+
+func set_run_config(new_level_id: int, new_difficulty_id: int) -> void:
+	## 关卡/难度配置（开局前由房主/专服写入）。只影响之后刷出的敌人与波次间隔，
+	## 不追改场上存量敌人（避免中途改难度造成血条跳变）。关卡/难度跨 reset 保留。
+	level_id = clampi(new_level_id, 0, Levels.level_count() - 1)
+	difficulty_id = clampi(new_difficulty_id, 0, Levels.difficulty_count() - 1)
+	wave = Levels.wave_of(level_id, difficulty_id, elapsed)
+	spawn_interval = Levels.spawn_interval(level_id, difficulty_id, wave)
+	if kills == 0:
+		_next_boss_at = Levels.boss_every_kills(difficulty_id)
 
 
 func add_player(id: int) -> void:
@@ -97,13 +120,19 @@ func set_remote_input(id: int, move: Vector2, buttons: int) -> void:
 
 func spawn_enemy(pos: Vector2, kind: int = Combat.ENEMY_KIND_NORMAL) -> int:
 	var eid := _alloc_id()
-	var full := Waves.enemy_hp(kind, wave)
+	var full := Levels.enemy_hp(kind, level_id, difficulty_id, wave)
+	var elem := Levels.element_bias(level_id)
+	var elem_until := 0.0
+	if elem != Skills.ELEM_PHYS:
+		elem_until = elapsed + Skills.ELEMENT_SECONDS  # 关卡元素偏向：开局自带元素
 	enemies[eid] = {
 		"pos": pos,
 		"hp": full,
 		"max_hp": full,
 		"kind": kind,
 		"touch_cd": 0.0,
+		"element": elem,
+		"element_until": elem_until,
 	}
 	return eid
 
@@ -127,10 +156,10 @@ func physics_step(delta: float) -> void:
 	_idle_seconds = 0.0
 	tick += 1
 	elapsed += delta
-	var w := Waves.wave_index(elapsed)
+	var w := Levels.wave_of(level_id, difficulty_id, elapsed)
 	if w != wave:
 		wave = w
-		spawn_interval = Waves.spawn_interval(w)
+		spawn_interval = Levels.spawn_interval(level_id, difficulty_id, w)
 	if players.has(1):
 		players[1]["move"] = local_move
 		players[1]["buttons"] = local_buttons
@@ -140,6 +169,7 @@ func physics_step(delta: float) -> void:
 	_step_enemies(delta)
 	_step_downed(delta)
 	_step_loot(delta)
+	_step_skills(delta)
 	_step_spawner(delta)
 	_check_run_over()
 
@@ -197,6 +227,22 @@ func enemy_states() -> Array:
 	return out
 
 
+func element_states() -> Array:
+	## 元素状态的稀疏同步载荷：只列出「带非物理元素 + 仍在有效期内」的敌人，上限 MAX_ELEMENT_SYNC。
+	var out: Array = []
+	for id in enemies:
+		if out.size() >= Skills.MAX_ELEMENT_SYNC:
+			break
+		var e: Dictionary = enemies[id]
+		var elem := int(e.get("element", Skills.ELEM_PHYS))
+		if elem == Skills.ELEM_PHYS:
+			continue
+		if float(e.get("element_until", 0.0)) <= elapsed:
+			continue
+		out.append({"id": id, "elem": elem})
+	return out
+
+
 func loot_states() -> Array:
 	var out: Array = []
 	for id in loot:
@@ -234,8 +280,10 @@ func gain_xp(id: int, amount: int) -> int:
 	while int(p["xp"]) >= Progression.xp_to_next(int(p["level"])):
 		p["xp"] = int(p["xp"]) - Progression.xp_to_next(int(p["level"]))
 		p["level"] = int(p["level"]) + 1
+		p["skill_points"] = int(p["skill_points"]) + 1  # 每次升级额外获得 1 技能点
 		ups += 1
 	if ups > 0:
+		_emit_fx(Combat.FX_LEVELUP, p["pos"], 0.0)
 		_grant_offer(id)
 	return ups
 
@@ -273,6 +321,48 @@ func _grant_offer(id: int) -> void:
 		return
 	_offer[id] = Progression.draw_choices(_rng, 3)
 	_offer_sent[id] = false
+
+
+# ---------------- 技能树（每人独立节点 + 技能点） ----------------
+
+
+func unlock_skill(id: int, node_id: int) -> bool:
+	## 权威侧解锁一个技能节点：校验门禁（前置/点数）后扣点并追加。重复/非法一律拒绝。
+	if not players.has(id):
+		return false
+	var p: Dictionary = players[id]
+	if not Skills.can_unlock(p["skill_nodes"], node_id, int(p["skill_points"])):
+		return false
+	p["skill_nodes"] = Skills.unlock(p["skill_nodes"], node_id)
+	p["skill_points"] = int(p["skill_points"]) - Skills.cost_of(node_id)
+	return true
+
+
+func set_initial_build(id: int, preset_id: String = "") -> void:
+	## 初始构筑：开局直接授予一组节点（不消耗技能点），替代《生存代码》的 13 个角色专属起手。
+	if not players.has(id):
+		return
+	var pid := preset_id if not preset_id.is_empty() else Skills.default_preset()
+	var pset := Skills.preset(pid)
+	if pset.is_empty():
+		pset = Skills.preset(Skills.default_preset())
+	players[id]["skill_nodes"] = Skills.grant([], pset["nodes"])
+	players[id]["preset"] = String(pset["id"])
+
+
+func skill_state(id: int) -> Dictionary:
+	## 下发到客户端的技能树状态（技能点 + 已解锁节点）。
+	if not players.has(id):
+		return {"points": 0, "nodes": []}
+	var p: Dictionary = players[id]
+	return {"points": int(p["skill_points"]), "nodes": (p["skill_nodes"] as Array).duplicate()}
+
+
+func take_fx_events() -> Array:
+	## 取走本帧待广播特效；不取则保留（专服逐房场景下由 Net 每帧取一次）。
+	var out := fx_events
+	fx_events = []
+	return out
 
 
 # ---------------- 内部步进 ----------------
@@ -318,17 +408,23 @@ func _step_projectiles(delta: float) -> void:
 		if pr["ttl"] <= 0.0:
 			expired.append(pid)
 			continue
-		for eid in enemies:
+		for eid in enemies.keys():
+			if not enemies.has(eid):
+				continue
 			var e: Dictionary = enemies[eid]
 			var radius := Combat.enemy_radius(e["kind"])
-			var proj_r := Weapons.radius(pr["kind"])
+			var proj_r := Skills.projectile_radius(pr["kind"])
 			var hit := Combat.circle_hit(pr["pos"], proj_r, e["pos"], radius)
 			if not hit:
 				continue
+			var owner := int(pr.get("owner", 0))
 			e["hp"] -= int(pr["dmg"])
+			_emit_fx(Combat.FX_HIT, e["pos"], 0.0)
+			_resolve_element(pr, int(eid), e, owner)
+			_queue_event(owner, Skills.TRIG_HIT, e["pos"])
 			expired.append(pid)
-			if e["hp"] <= 0:
-				killed.append([eid, int(pr.get("owner", 0))])
+			if enemies.has(eid) and int(e["hp"]) <= 0:
+				killed.append([eid, owner])
 			break
 	for pid in expired:
 		projectiles.erase(pid)
@@ -340,9 +436,13 @@ func _step_enemies(delta: float) -> void:
 	var targets := _alive_targets()
 	for eid in enemies:
 		var e: Dictionary = enemies[eid]
+		if int(e["element"]) != Skills.ELEM_PHYS and float(e["element_until"]) <= elapsed:
+			e["element"] = Skills.ELEM_PHYS  # 过期即清除，避免元素状态无限残留
+			e["element_until"] = 0.0
 		var kind: int = e["kind"]
 		var dir := EnemyAI.chase_dir(e["pos"], targets)
-		e["pos"] = EnemyAI.step(e["pos"], dir, delta, Waves.enemy_speed(kind, wave))
+		var speed := Levels.enemy_speed(kind, level_id, difficulty_id, wave)
+		e["pos"] = EnemyAI.step(e["pos"], dir, delta, speed)
 		e["touch_cd"] = maxf(0.0, e["touch_cd"] - delta)
 		if e["touch_cd"] > 0.0:
 			continue
@@ -356,7 +456,16 @@ func _step_enemies(delta: float) -> void:
 			var touching := Combat.circle_hit(e["pos"], radius, p["pos"], Combat.PLAYER_RADIUS)
 			if not touching:
 				continue
-			p["hp"] = maxi(0, p["hp"] - Combat.enemy_touch_damage(kind))
+			var dmg := Combat.enemy_touch_damage(kind)
+			if int(p["shield"]) > 0:
+				# 「防火墙」护盾优先吸收，护盾见底前不掉血
+				var absorbed := mini(int(p["shield"]), dmg)
+				p["shield"] = int(p["shield"]) - absorbed
+				dmg -= absorbed
+				_emit_fx(Combat.FX_SHIELD, p["pos"], 0.0)
+			if dmg > 0:
+				p["hp"] = maxi(0, p["hp"] - dmg)
+			_queue_event(id, Skills.TRIG_HURT, p["pos"])
 			e["touch_cd"] = Combat.enemy_touch_interval(kind)
 			if p["hp"] <= 0:
 				p["status"] = Combat.PLAYER_DOWNED
@@ -411,6 +520,11 @@ func _step_loot(delta: float) -> void:
 			var heal := int(p["mods"]["heal_add"])
 			if heal > 0:
 				p["hp"] = mini(p["hp"] + heal, Progression.max_hp(p["mods"]))
+			if int(l["kind"]) == Combat.LOOT_KIND_BYTE:
+				# 字节币入库（有界）：只有拾取字节币才触发「拾取挂钩」
+				p["bytes_owned"] = mini(Skills.BYTE_KIND_MAX, int(p["bytes_owned"]) + 1)
+				_emit_fx(Combat.FX_COIN, l["pos"], 0.0)
+				_queue_event(target, Skills.TRIG_PICKUP, l["pos"])
 			removed.append(lid)
 		else:
 			# M4.4：取消磁吸半径上限——碎片从任意距离飞向归属玩家
@@ -424,12 +538,13 @@ func _step_spawner(delta: float) -> void:
 	if players.is_empty():
 		return  # 专用服务器在无人接入前不刷怪，避免敌人空堆在原点
 	_spawn_accum += delta
-	if _spawn_accum >= spawn_interval and enemies.size() < Waves.max_enemies(wave):
+	var cap := Levels.max_enemies(level_id, difficulty_id, wave)
+	if _spawn_accum >= spawn_interval and enemies.size() < cap:
 		_spawn_accum = 0.0
 		_spawn_normal()
 	if kills >= _next_boss_at and boss_id == 0 and not players.is_empty():
 		spawn_boss()
-		_next_boss_at += Combat.BOSS_EVERY_KILLS
+		_next_boss_at += Levels.boss_every_kills(difficulty_id)
 
 
 func _step_idle(delta: float) -> void:
@@ -486,13 +601,28 @@ func _kill_enemy(eid: int, owner: int = 0) -> void:
 	var e: Dictionary = enemies[eid]
 	var pos: Vector2 = e["pos"]
 	var kind: int = e["kind"]
+	var overflow := maxi(0, -int(e["hp"]))  # 击杀时的溢出伤害（供「超杀」转化）
 	enemies.erase(eid)
 	if eid == boss_id:
 		boss_id = 0
 		boss_kills += 1
 	kills += 1
+	_emit_fx(Combat.FX_BURST, pos, 30.0)
+	_queue_event(owner, Skills.TRIG_KILL, pos)
 	var loot_kind := Combat.LOOT_KIND_BIG if kind == Combat.ENEMY_KIND_BOSS else Combat.LOOT_KIND_XP
 	_add_loot(pos, loot_kind, owner)
+	_overkill_burst(pos, overflow, owner)
+
+
+func _overkill_burst(pos: Vector2, overflow: int, owner: int) -> void:
+	## 「超杀」修饰：把击杀时的溢出伤害炸成一圈 AoE，仅在解锁该修饰的玩家身上发生。
+	if overflow <= 0 or not players.has(owner):
+		return
+	var radius := float(Skills.modifiers(players[owner]["skill_nodes"])["overkill_radius"])
+	if radius <= 0.0:
+		return
+	_skill_aoe(pos, radius, overflow, owner)
+	_emit_fx(Combat.FX_BURST, pos, radius)
 
 
 func _add_loot(pos: Vector2, kind: int, owner: int = 0) -> void:
@@ -602,4 +732,299 @@ func _new_player() -> Dictionary:
 		"mods": Progression.default_modifiers(),
 		"level": 1,
 		"xp": 0,
+		"skill_points": 0,
+		"skill_nodes": [],
+		"skill_state": SkillRuntime.new_state(),
+		"bytes_owned": 0,
+		"shield": 0,
+		"preset": "",
 	}
+
+
+# ---------------- 技能执行（权威侧落地 runtime 的动作指令） ----------------
+
+
+func _step_skills(delta: float) -> void:
+	## 技能只在存活玩家上跑：先周期触发（遍历/字节农场），再消费本帧事件（命中/击杀/拾取/受伤）。
+	## 事件批次先取走再处理，避免 _kill_enemy 追加的事件在本帧内形成无界递归。
+	var batch := _events
+	_events = []
+	if players.is_empty():
+		return
+	for id in players.keys():
+		if not players.has(id):
+			continue
+		var p: Dictionary = players[id]
+		if p["status"] != Combat.PLAYER_ALIVE:
+			continue
+		var nodes: Array = p["skill_nodes"]
+		if nodes.is_empty():
+			continue
+		_apply_commands(id, SkillRuntime.tick(p["skill_state"], nodes, delta, elapsed))
+	for ev in batch:
+		var pid := int(ev["player"])
+		if not players.has(pid) or players[pid]["status"] != Combat.PLAYER_ALIVE:
+			continue
+		var ev_nodes: Array = players[pid]["skill_nodes"]
+		if ev_nodes.is_empty():
+			continue
+		_apply_commands(
+			pid,
+			SkillRuntime.dispatch(players[pid]["skill_state"], ev_nodes, int(ev["event"]), elapsed)
+		)
+
+
+func _apply_commands(id: int, cmds: Array) -> void:
+	if cmds.is_empty() or not players.has(id):
+		return
+	var p: Dictionary = players[id]
+	if p["status"] != Combat.PLAYER_ALIVE:
+		return
+	var pos: Vector2 = p["pos"]
+	for c in cmds:
+		if not _condition_ok(p, c):
+			continue
+		# 循环层：同一条动作指令重复执行 loops 次（上限 MAX_LOOPS，防被叠成无限递归）
+		var loops := clampi(int(c.get("loops", 1)), 1, Skills.MAX_LOOPS)
+		for _i in loops:
+			_apply_effect(id, p, pos, c)
+
+
+func _condition_ok(p: Dictionary, c: Dictionary) -> bool:
+	## 条件分支门禁：全部按权威侧实时状态判定（客户端不参与，避免作弊与不同步）。
+	match int(c.get("cond", Skills.COND_NONE)):
+		Skills.COND_LOW_HP:
+			var max_hp := maxi(1, Progression.max_hp(p["mods"]))
+			return float(p["hp"]) / float(max_hp) * 100.0 <= float(c.get("cond_value", 0))
+		Skills.COND_BYTES:
+			return int(p["bytes_owned"]) >= int(c.get("cond_value", 0))
+		Skills.COND_ENEMIES:
+			return enemies.size() >= int(c.get("cond_value", 0))
+		Skills.COND_WAVE:
+			return wave >= int(c.get("cond_value", 0))
+	return true
+
+
+func _apply_effect(id: int, p: Dictionary, pos: Vector2, c: Dictionary) -> void:
+	## 单条动作指令落地。「进化脉冲」按波次给可增幅伤害补偿；固定伤害类（damage_base）不受影响。
+	var cc := c
+	var wave_extra := int(c.get("wave_damage", 0)) * maxi(0, wave - 1)
+	if wave_extra > 0:
+		cc = c.duplicate()
+		cc["damage"] = int(c["damage"]) + wave_extra
+	match int(cc["effect"]):
+		Skills.EFF_SPAWN_BYTE:
+			_add_loot(pos, Combat.LOOT_KIND_BYTE, id)
+			_emit_fx(Combat.FX_COIN, pos, 0.0)
+		Skills.EFF_SINGLE_DMG:
+			_fire_skill_shot(id, pos, 8, cc)
+		Skills.EFF_LASER:
+			_fire_skill_shot(id, pos, 10, cc)
+			# 亮束长度取固定值（c["radius"] 是弹丸半径，不等于束长），方向对准最近敌人
+			_emit_fx(Combat.FX_LASER, pos, 260.0, Combat.aim_dir(pos, _enemy_positions()))
+		Skills.EFF_SPLIT:
+			_fire_skill_shot(id, pos, 11, cc)
+		Skills.EFF_HOMING:
+			_fire_skill_shot(id, pos, 12, cc)
+		Skills.EFF_SPIKE:
+			_fire_skill_volley(id, pos, Skills.PROJ_SPIKE, cc, maxi(1, int(cc["count"])), 0.22)
+		Skills.EFF_CHIP:
+			# 芯片数据包：命中后在原地植入一块伤害区域
+			_skill_aoe(pos, float(cc["radius"]), int(cc["damage"]), id)
+			_emit_fx(Combat.FX_CHIP, pos, float(cc["radius"]))
+		Skills.EFF_BUG:
+			# BUG 机制：击杀后向附近敌人扩散病毒
+			_skill_aoe(pos, float(cc["radius"]), int(cc["damage"]), id)
+			_emit_fx(Combat.FX_BUG, pos, float(cc["radius"]))
+		Skills.EFF_NULL:
+			# 空指针：受伤时近身反击
+			_skill_aoe(pos, float(cc["radius"]), int(cc["damage"]), id)
+			_emit_fx(Combat.FX_NULL, pos, float(cc["radius"]))
+		Skills.EFF_WEAKEST:
+			# 最弱协议：处决血量比例最低的敌人
+			_skill_hit_weakest(int(cc["damage"]), id)
+		Skills.EFF_GIGA:
+			_skill_aoe(pos, float(cc["radius"]), int(cc["damage"]), id)
+			_emit_fx(Combat.FX_GIGA, pos, float(cc["radius"]))
+		Skills.EFF_FAULT:
+			_skill_aoe(pos, float(cc["radius"]), int(cc["damage"]), id)
+			_emit_fx(Combat.FX_FAULT, pos, float(cc["radius"]))
+		Skills.EFF_SPIN:
+			_skill_aoe(pos, float(cc["radius"]), int(cc["damage"]), id)
+			_emit_fx(Combat.FX_SPIN, pos, float(cc["radius"]))
+		Skills.EFF_MINE_COPY:
+			var mines := maxi(1, int(cc["count"]))
+			for i in mines:
+				var off := Vector2.RIGHT.rotated(TAU * float(i) / float(mines)) * 36.0
+				_skill_aoe(pos + off, float(cc["radius"]), int(cc["damage"]), id)
+				_emit_fx(Combat.FX_BURST, pos + off, float(cc["radius"]))
+		Skills.EFF_BYTE_BURST:
+			if _consume_bytes(id, 1):
+				# 字节爆裂/风暴/脉冲：固定伤害，不受「溢出伤害」等修饰增幅
+				_skill_aoe(pos, float(cc["radius"]), int(cc["damage_base"]), id)
+				_emit_fx(Combat.FX_BURST, pos, float(cc["radius"]))
+		Skills.EFF_BYTE_STORM:
+			if _consume_bytes(id, int(p["bytes_owned"])):
+				_skill_aoe(pos, float(cc["radius"]), int(cc["damage_base"]), id)
+				_emit_fx(Combat.FX_BURST, pos, float(cc["radius"]))
+		Skills.EFF_BYTE_PULSE:
+			_skill_aoe(pos, float(cc["radius"]), int(cc["damage_base"]), id)
+			_emit_fx(Combat.FX_PULSE, pos, float(cc["radius"]))
+		Skills.EFF_NUKE:
+			_skill_aoe(pos, float(cc["radius"]), int(cc["damage"]), id)
+			_emit_fx(Combat.FX_NUKE, pos, float(cc["radius"]))
+		Skills.EFF_ORBIT:
+			_skill_aoe(pos, 90.0, int(cc["damage"]), id)
+			_emit_fx(Combat.FX_PULSE, pos, 90.0)
+		Skills.EFF_MINE:
+			_skill_aoe(pos, float(cc["radius"]), int(cc["damage"]), id)
+			_emit_fx(Combat.FX_BURST, pos, float(cc["radius"]))
+		Skills.EFF_SHIELD:
+			p["shield"] = Combat.BYTE_SHIELD
+			_emit_fx(Combat.FX_SHIELD, pos, 0.0)
+		Skills.EFF_DRAIN:
+			p["hp"] = mini(int(p["hp"]) + Combat.DRAIN_HEAL, Progression.max_hp(p["mods"]))
+			_emit_fx(
+				Combat.FX_DRAIN, pos, float(cc["radius"]), Combat.aim_dir(pos, _enemy_positions())
+			)
+		Skills.EFF_SUMMON:
+			_skill_aoe(pos, 70.0, Combat.SUMMON_DAMAGE, id)
+			_emit_fx(Combat.FX_PULSE, pos, 70.0)
+
+
+func _skill_hit_weakest(dmg: int, owner: int) -> void:
+	## 「最弱协议」：锁定血量比例最低的敌人并结算伤害（比例用小分母，Boss 与杂兵可比）。
+	if dmg <= 0:
+		return
+	var best_id := 0
+	var best := INF
+	for eid in enemies:
+		var e: Dictionary = enemies[eid]
+		var ratio := float(e["hp"]) / float(maxi(1, int(e.get("max_hp", 1))))
+		if ratio < best:
+			best = ratio
+			best_id = int(eid)
+	if best_id == 0:
+		return
+	var target: Dictionary = enemies[best_id]
+	target["hp"] = int(target["hp"]) - dmg
+	_emit_fx(Combat.FX_NULL, target["pos"], 0.0)
+	if int(target["hp"]) <= 0:
+		_kill_enemy(best_id, owner)
+
+
+func _fire_skill_shot(id: int, pos: Vector2, kind: int, c: Dictionary) -> void:
+	_fire_skill_volley(id, pos, kind, c, 1, 0.0)
+
+
+func _fire_skill_volley(
+	id: int, pos: Vector2, kind: int, c: Dictionary, n: int, spread: float
+) -> void:
+	## 技能弹丸：伤害/存活时间取自指令（modifiers 已叠加），速度缺省时回退技能弹表。
+	## n>1 时呈扇形散布（供「尖刺数据包」一排齐射）；n=1 时与旧行为逐位一致（零回归）。
+	var dir := Combat.aim_dir(pos, _enemy_positions())
+	if dir == Vector2.ZERO:
+		return
+	var info: Dictionary = Skills.projectile(kind)
+	var speed := float(c["speed"])
+	if speed <= 0.0:
+		speed = float(info.get("speed", 600.0))
+	var ttl := float(c["ttl"])
+	if ttl <= 0.0:
+		ttl = float(info.get("ttl", 1.4))
+	for i in maxi(1, n):
+		if projectiles.size() >= Weapons.MAX_PROJECTILES:
+			break
+		var d := dir.rotated((float(i) - float(n - 1) * 0.5) * spread)
+		var pid := _alloc_id()
+		projectiles[pid] = {
+			"pos": pos,
+			"vel": d * speed,
+			"ttl": ttl,
+			"dmg": int(c["damage"]),
+			"dir": d,
+			"kind": kind,
+			"owner": id,
+			"element": int(c["element"]),
+			"elements": (c["elements"] as Array).duplicate(),
+			"pierce": int(c["pierce"]),
+		}
+
+
+func _skill_aoe(pos: Vector2, radius: float, dmg: int, owner: int) -> void:
+	## 技能范围伤害。用 enemies.keys() 快照迭代：命中结算可能连带击杀并擦除敌人。
+	if dmg <= 0:
+		return
+	for eid in enemies.keys():
+		if not enemies.has(eid):
+			continue
+		var e: Dictionary = enemies[int(eid)]
+		if not Combat.circle_hit(pos, radius, e["pos"], Combat.enemy_radius(int(e["kind"]))):
+			continue
+		e["hp"] = int(e["hp"]) - dmg
+		if int(e["hp"]) <= 0:
+			_kill_enemy(int(eid), owner)
+
+
+func _consume_bytes(id: int, n: int) -> bool:
+	if n <= 0 or not players.has(id):
+		return false
+	var p: Dictionary = players[id]
+	if int(p["bytes_owned"]) < n:
+		return false
+	p["bytes_owned"] = int(p["bytes_owned"]) - n
+	return true
+
+
+func _resolve_element(pr: Dictionary, eid: int, e: Dictionary, owner: int) -> void:
+	## 弹丸元素与敌人身上残留元素的反应（蒸汽爆裂 / 超导 / 等离子），并记下本发元素。
+	var elems: Array = pr.get("elements", [])
+	for el in elems:
+		var elem := int(el)
+		if elem == Skills.ELEM_PHYS:
+			continue
+		var cur := int(e.get("element", Skills.ELEM_PHYS))
+		if cur != Skills.ELEM_PHYS and cur != elem:
+			var r := Skills.reaction(cur, elem)
+			if not r.is_empty():
+				e["element"] = Skills.ELEM_PHYS
+				var rad := float(r["radius"])
+				_emit_fx(Combat.FX_REACTION, e["pos"], rad)
+				if rad <= 0.0:
+					e["hp"] = int(e["hp"]) - int(r["damage"])
+					if int(e["hp"]) <= 0:
+						_kill_enemy(eid, owner)
+				else:
+					_skill_aoe(e["pos"], rad, int(r["damage"]), owner)
+				return
+		e["element"] = elem
+		e["element_until"] = elapsed + Skills.ELEMENT_SECONDS
+		_emit_fx(_element_fx(elem), e["pos"], 0.0)
+
+
+func _element_fx(elem: int) -> int:
+	match elem:
+		Skills.ELEM_FIRE:
+			return Combat.FX_BURN
+		Skills.ELEM_FROST:
+			return Combat.FX_FROST
+		Skills.ELEM_ELEC:
+			return Combat.FX_CHAIN
+	return Combat.FX_HIT
+
+
+func _queue_event(id: int, event: int, pos: Vector2) -> void:
+	if id <= 0 or not players.has(id):
+		return
+	if _events.size() >= MAX_SKILL_EVENTS:
+		return
+	_events.append({"player": id, "event": event, "pos": pos})
+
+
+func _emit_fx(kind: int, pos: Vector2, radius: float = 0.0, dir: Vector2 = Vector2.ZERO) -> void:
+	## dir 仅供方向性特效（激光亮束 / 吸血连线）使用；默认零向量表示「无方向」。
+	if fx_events.size() >= MAX_FX_EVENTS:
+		return
+	fx_events.append({"kind": kind, "pos": pos, "radius": radius, "dir": dir})
+
+# gdlint:ignore=max-file-lines

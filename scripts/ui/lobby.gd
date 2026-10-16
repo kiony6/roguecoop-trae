@@ -11,6 +11,7 @@ func _ready() -> void:
 	$Center/Card/Box/JoinButton.pressed.connect(_on_join)
 	$Center/Card/Box/CodeField.max_length = 6
 	$Center/Card/Box/LogoutButton.pressed.connect(_on_logout)
+	$Center/Card/Box/LeaderboardButton.pressed.connect(_on_leaderboard)
 	Lobby.room_updated.connect(_on_room_updated)
 	Lobby.room_failed.connect(_on_room_failed)
 	_update_who()
@@ -43,6 +44,11 @@ func _on_logout() -> void:
 	Account.logout()
 	_update_who()
 	_set_status("已退出登录")
+
+
+func _on_leaderboard() -> void:
+	## 保持大厅连接跳到排行榜页（该页据此拉取在线榜数据）。
+	get_tree().change_scene_to_file("res://scenes/ui/leaderboard.tscn")
 
 
 func _on_room_updated() -> void:

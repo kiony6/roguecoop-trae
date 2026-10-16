@@ -19,10 +19,25 @@ func push_authoritative(pos: Vector2) -> void:
 
 
 func _draw() -> void:
-	var big := kind == Combat.LOOT_KIND_BIG
-	var r := 9.0 if big else 6.0
-	var col := Color("ffd93d") if big else Color("7be07b")
+	match kind:
+		Combat.LOOT_KIND_BIG:
+			_draw_gem(9.0, Color("ffd93d"))
+		Combat.LOOT_KIND_BYTE:
+			_draw_byte()
+		_:
+			_draw_gem(6.0, Color("7be07b"))
+
+
+func _draw_gem(r: float, col: Color) -> void:
 	var pts := PackedVector2Array(
 		[Vector2(0.0, -r), Vector2(r, 0.0), Vector2(0.0, r), Vector2(-r, 0.0)]
 	)
 	draw_colored_polygon(pts, col)
+
+
+func _draw_byte() -> void:
+	## 字节币：蓝色方块 + 中心字节刻度（技能节点的资源型掉落，与经验碎片区分）。
+	var r := 7.0
+	_draw_gem(r, Color("4aa3ff"))
+	draw_rect(Rect2(-r * 0.5, -r * 0.5, r, r), Color("ffd93d"), false, 1.0)
+	draw_line(Vector2(-r * 0.5, 0.0), Vector2(r * 0.5, 0.0), Color("0e1524"), 2.0)

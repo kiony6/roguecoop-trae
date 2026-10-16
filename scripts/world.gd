@@ -8,9 +8,16 @@ const LootScript := preload("res://scripts/loot.gd")
 const ProjectileScript := preload("res://scripts/projectile.gd")
 const UpgradeMenu := preload("res://scripts/upgrade_menu.gd")
 const RunOverMenu := preload("res://scripts/runover_menu.gd")
+const SkillTree := preload("res://scripts/ui/skill_tree.gd")
+const Fx := preload("res://scripts/fx.gd")
 const Progression := preload("res://sim/progression.gd")
 const Weapons := preload("res://sim/weapons.gd")
 const Rooms := preload("res://sim/rooms.gd")
+const Skills := preload("res://sim/skills.gd")
+const Levels := preload("res://sim/levels.gd")
+
+const ELEM_TTL_MS := 1200  # 客户端元素状态最长保留时间，丢包时靠它自然褪色
+const DEFAULT_CLEAR_COLOR := Color("2a3550")  # 默认清屏色（= 关卡 0 底色），离开世界页时恢复
 
 const COLORS: Array[Color] = [
 	Color("4aa3ff"),
@@ -21,6 +28,7 @@ const COLORS: Array[Color] = [
 
 var _player_nodes := {}
 var _enemy_nodes := {}
+var _enemy_elems := {}  # id -> {elem, at_ms}，元素状态走独立稀疏通道，按 TTL 过期
 var _loot_nodes := {}
 var _proj_nodes := {}
 var _level := 1
@@ -29,11 +37,15 @@ var _kills := 0
 var _wave := 1
 var _local_weapon := 0
 var _last_pick := ""
+var _theme: Dictionary = {}  # 当前关卡主题（bg / border），M7
 
 var _upgrade_menu: Control
 var _runover_menu: Control
+var _skill_tree: Control
+var _fx_root: Node2D
 
 @onready var _info: Label = $Hud/Info
+@onready var _camera: Camera2D = $Camera2D
 
 
 func _ready() -> void:
@@ -43,8 +55,15 @@ func _ready() -> void:
 	Net.player_upgrade.connect(_on_player_upgrade)
 	Net.run_over.connect(_on_run_over)
 	Net.room_ready.connect(_on_room_ready)
+	Net.fx.connect(_on_fx)
+	Net.enemy_elements.connect(_on_enemy_elements)
+	_apply_theme()
 	if Net.is_host():
 		queue_redraw()
+
+	_fx_root = Node2D.new()
+	_fx_root.name = "Fx"
+	add_child(_fx_root)
 
 	_upgrade_menu = UpgradeMenu.new()
 	_upgrade_menu.name = "UpgradeMenu"
@@ -56,23 +75,71 @@ func _ready() -> void:
 	$Hud.add_child(_runover_menu)
 	_runover_menu.back_requested.connect(_on_back_requested)
 
+	_skill_tree = SkillTree.new()
+	_skill_tree.name = "SkillTree"
+	_skill_tree.setup_overlay()
+	$Hud.add_child(_skill_tree)
+	_add_skill_tree_button()
+
 	_update_info()
 
 
 func _process(_delta: float) -> void:
 	_update_info()
+	_update_camera()
+
+
+func _update_camera() -> void:
+	# 镜头逐帧硬跟随本地玩家：本帧的物理步已完成，取到的是玩家本帧最终位置，零延迟。
+	# 之前用 Camera2D 平滑（position_smoothing）造成镜头追着 60Hz 物理位置来回摆而抖动，
+	# 且平滑与 limit 钳制在场地边缘叠加也会抖，故两者都去掉。
+	var node: Node2D = _player_nodes.get(Net.local_id)
+	if node != null:
+		_camera.global_position = node.global_position
+
+
+func _apply_theme() -> void:
+	## 按当前房间关卡（不在房内用默认关）套用主题：清屏色取 bg，竞技场边框取 border。
+	var level := Lobby.level_id if Lobby.in_room() else Levels.DEFAULT_LEVEL
+	_theme = Levels.level_by_id(level)
+	RenderingServer.set_default_clear_color(_theme.get("bg", DEFAULT_CLEAR_COLOR))
+	queue_redraw()
 
 
 func _draw() -> void:
 	for w in Net.room_walls():
 		var r: Rect2 = w
-		draw_rect(r, Color("2a3550"), true)
+		draw_rect(r, _theme.get("bg", DEFAULT_CLEAR_COLOR), true)
 		draw_rect(r, Color("3d4d70"), false, 2.0)
-	draw_rect(Rooms.arena_rect(), Color("5566aa"), false, 4.0)
+	draw_rect(Rooms.arena_rect(), _theme.get("border", Color("5566aa")), false, 4.0)
 
 
 func _on_room_ready() -> void:
 	queue_redraw()
+
+
+func _add_skill_tree_button() -> void:
+	## 对局内技能树入口：右上角，与升级面板同属 HUD 层。
+	var btn := Button.new()
+	btn.name = "SkillTreeButton"
+	btn.text = "技能树"
+	btn.anchor_left = 1.0
+	btn.anchor_right = 1.0
+	btn.offset_left = -120.0
+	btn.offset_right = -16.0
+	btn.offset_top = 12.0
+	btn.offset_bottom = 44.0
+	btn.pressed.connect(_skill_tree.open)
+	$Hud.add_child(btn)
+
+
+func _on_fx(kind: int, pos: Vector2, dir: Vector2, radius: float) -> void:
+	## 特效表现：档位关闭或超出单帧上限则丢弃（防刷屏、防无界累积）。
+	if _fx_root.get_child_count() >= Fx.cap():
+		return
+	var node := Fx.make(kind, pos, dir, radius)
+	if node != null:
+		_fx_root.add_child(node)
 
 
 func _on_world_state(
@@ -114,10 +181,26 @@ func _sync_enemies(enemies: Array) -> void:
 		if node == null:
 			node = _spawn_enemy(id)
 		node.push_authoritative(e["pos"], int(e.get("hp01", 255)), int(e.get("kind", 0)))
+		node.set_element(_active_elem(id))
 	for id in _enemy_nodes.keys():
 		if not alive.has(id):
 			_enemy_nodes[id].queue_free()
 			_enemy_nodes.erase(id)
+			_enemy_elems.erase(id)
+
+
+func _on_enemy_elements(ids: PackedInt32Array, elems: PackedByteArray) -> void:
+	## 稀疏元素状态落表；只有条目里的敌人会被更新，其余靠 TTL 自然褪色。
+	var now := Time.get_ticks_msec()
+	for i in ids.size():
+		_enemy_elems[ids[i]] = {"elem": int(elems[i]), "at_ms": now}
+
+
+func _active_elem(id: int) -> int:
+	var rec: Dictionary = _enemy_elems.get(id, {})
+	if rec.is_empty() or Time.get_ticks_msec() - int(rec["at_ms"]) > ELEM_TTL_MS:
+		return Skills.ELEM_PHYS
+	return int(rec["elem"])
 
 
 func _sync_loot(loot: Array) -> void:
@@ -219,6 +302,7 @@ func _on_run_over(won: bool, stats: Dictionary) -> void:
 
 
 func _on_back_requested() -> void:
+	RenderingServer.set_default_clear_color(DEFAULT_CLEAR_COLOR)
 	# 经大厅的房间：结算后回房间页等待房主再来一局，不拆 peer 连接
 	if Lobby.in_room():
 		get_tree().change_scene_to_file("res://scenes/ui/room.tscn")
@@ -238,10 +322,15 @@ func _update_info() -> void:
 		role = "客户端 id=%d" % Net.local_id
 	var pick := "" if _last_pick.is_empty() else " | %s" % _last_pick
 	var wpn := " | 武器 %s" % Weapons.name_of(_local_weapon)
+	var skill := " | 技能点 %d" % int(Net.local_skill_state()["points"])
+	var level := Lobby.level_id if Lobby.in_room() else Levels.DEFAULT_LEVEL
+	var diff := Lobby.difficulty_id if Lobby.in_room() else Levels.DEFAULT_DIFFICULTY
+	var cfg := "关卡 %s · 难度 %s" % [Levels.name_of_level(level), Levels.name_of_difficulty(diff)]
 	_info.text = (
-		"%s | 波次 %d | 等级 %d (经验 %d) | 击杀 %d | 在线 %d | 敌人 %d | 掉落 %d | 弹丸 %d%s%s"
+		"%s | %s | %s | 波次 %d | 等级 %d (经验 %d) | 击杀 %d | 在线 %d | 敌人 %d | 掉落 %d | 弹丸 %d%s%s%s"
 		% [
 			role,
+			cfg,
 			_wave,
 			_level,
 			_xp,
@@ -251,6 +340,7 @@ func _update_info() -> void:
 			_loot_nodes.size(),
 			_proj_nodes.size(),
 			wpn,
+			skill,
 			pick,
 		]
 	)

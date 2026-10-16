@@ -27,6 +27,13 @@ signal version_mismatch(server_version: int)
 signal room_state(code: String, is_host: bool, state: int, members: PackedStringArray)
 signal room_error(err: int)
 signal lobby_event(event: String, code: String, peer: int)
+signal skill_state_changed(points: int, nodes: PackedInt32Array)
+signal player_skill_unlock(player_id: int, node_id: int)
+signal fx(kind: int, pos: Vector2, dir: Vector2, radius: float)
+signal enemy_elements(ids: PackedInt32Array, elems: PackedByteArray)  # 稀疏元素状态（只含带元素的敌人）
+signal room_config(level_id: int, difficulty_id: int)  # 房配置下发（M7）
+signal progress_data(cleared: PackedInt32Array, best_wave: PackedInt32Array)  # 关卡解锁进度（M7）
+signal leaderboard_data(board: int, difficulty_id: int, rows: Array)  # 榜单数据（M7）
 
 enum Mode { NONE, HOST, CLIENT, SERVER }
 
@@ -58,10 +65,13 @@ var _input_queue: Array = []
 var _snap_queue: Array = []
 var _idle_resets_seen := 0
 var _account_server = null  # 账号服务实例（HOST 且启用账号时非空；由 dedicated.gd 注入）
+var _score_board = null  # 榜单与关卡进度（SERVER 且启用榜单时非空；由 dedicated.gd 注入）
 var _declared: Dictionary = {}  # 服务端：peer -> {"version": int, "role": int}
 var _handshake_deadlines: Dictionary = {}  # 服务端：peer -> declare 截止毫秒
 var _hello_deadline := -1  # 客户端：等 hello 的截止毫秒
 var _lobby = null  # SERVER 模式：房间表 + peer→房间 路由（由 server_start 创建）
+var _skill_points := 0  # CLIENT：最近一次收到的技能点
+var _skill_nodes: Array = []  # CLIENT：最近一次收到的已解锁节点
 
 
 func _ready() -> void:
@@ -137,6 +147,22 @@ func accounts_enabled() -> bool:
 	return _account_server != null
 
 
+func enable_scores(board) -> void:
+	## 专服注入榜单与关卡进度实例；仅 SERVER 模式使用。
+	_score_board = board
+
+
+func scores_enabled() -> bool:
+	return _score_board != null
+
+
+func _username_of(peer: int) -> String:
+	## 大厅用户名字符串（未登录 / 未启用账号时为空串）；写榜与进度查询的唯一来源。
+	if _account_server == null or not _account_server.has_method("current_user"):
+		return ""
+	return String(_account_server.current_user(peer))
+
+
 func send_register(username: String, salt_b64: String, verifier_b64: String) -> void:
 	if mode == Mode.CLIENT:
 		_rpc_register.rpc_id(1, username, salt_b64, verifier_b64)
@@ -175,6 +201,24 @@ func send_room_leave() -> void:
 func send_room_start() -> void:
 	if mode == Mode.CLIENT:
 		_rpc_room_start.rpc_id(1)
+
+
+func send_room_config(level_id: int, difficulty_id: int) -> void:
+	## 房主选关/选难度（M7）：仅 CLIENT 上行，服务端校验房主身份。
+	if mode == Mode.CLIENT:
+		_rpc_room_config.rpc_id(1, level_id, difficulty_id)
+
+
+func send_progress_request() -> void:
+	## 拉取本人关卡解锁进度（M7）：仅 CLIENT 上行。
+	if mode == Mode.CLIENT:
+		_rpc_progress_request.rpc_id(1)
+
+
+func send_leaderboard_request(board: int, difficulty_id: int) -> void:
+	## 拉取榜单（M7）：仅 CLIENT 上行；board ∈ {BOARD_WAVE, BOARD_SKILL}。
+	if mode == Mode.CLIENT:
+		_rpc_leaderboard_request.rpc_id(1, board, difficulty_id)
 
 
 func is_run_over() -> bool:
@@ -231,8 +275,17 @@ func host_start(port: int, as_dedicated: bool = false, bind_ip: String = "") -> 
 	_snap_accum = 0.0
 	set_physics_process(true)
 	if not as_dedicated:
+		# 主机本地玩家开局即获得默认构筑（技能树起点），并同步下发一次技能树状态
+		_host.set_initial_build(1)
+		_emit_local_skill_state()
 		player_joined.emit(1)
 	return OK
+
+
+func set_host_run_config(level_id: int, difficulty_id: int) -> void:
+	## HOST：CLI/专服 game 模式覆盖本机权威模拟的关卡与难度（M7）；非 HOST 无操作。
+	if mode == Mode.HOST:
+		_host.set_run_config(level_id, difficulty_id)
 
 
 func server_start(port: int, bind_ip: String = "") -> Error:
@@ -286,6 +339,8 @@ func host_stop() -> void:
 	_declared.clear()
 	_handshake_deadlines.clear()
 	_snap_queue.clear()
+	_skill_points = 0
+	_skill_nodes = []
 
 
 # ---------------- 客户端 ----------------
@@ -327,6 +382,8 @@ func client_disconnect() -> void:
 	_client.reset()
 	local_id = 0
 	_hello_deadline = -1
+	_skill_points = 0
+	_skill_nodes = []
 
 
 # ---------------- 对外输入 ----------------
@@ -378,6 +435,7 @@ func _physics_process(delta: float) -> void:
 			_host.local_buttons = _read_buttons()
 		if not _host.run_over:
 			_host.physics_step(delta)
+			_dispatch_host_fx()
 			_announce_idle_reset()
 		if not dedicated:
 			# 本机渲染每物理帧刷新（60Hz），直连完整权威状态
@@ -398,18 +456,22 @@ func _physics_process(delta: float) -> void:
 		if _snap_accum >= 1.0 / float(Protocol.SNAPSHOT_RATE):
 			_snap_accum = 0.0
 			_send_snapshots()
+			if not _host.run_over:
+				_dispatch_host_elements()
 	elif mode == Mode.SERVER:
 		# 大厅专服：一条 peer 连接按 peer→房间 路由输入/快照/升级/结算，逐房驱动
 		_check_handshakes()
 		_drain_input_queue()
 		if _lobby != null:
 			_lobby.step(delta)
+			_dispatch_room_fx()
 			_offer_to_rooms()
 			_check_rooms_run_over()
 			_snap_accum += delta
 			if _snap_accum >= 1.0 / float(Protocol.SNAPSHOT_RATE):
 				_snap_accum = 0.0
 				_send_room_snapshots()
+				_dispatch_room_elements()
 	elif mode == Mode.CLIENT:
 		_check_hello()
 		_drain_snap_queue()
@@ -510,6 +572,7 @@ func _check_room_run_over(code: String) -> void:
 		)
 	# 结算不拆连接：房间回 WAITING、保留成员、换新地图，房主可再开一局（根治 F11）
 	var members: PackedInt32Array = _lobby.members_of(code)
+	_record_room_scores(code, logic)
 	_lobby.finish_run(code)
 	for peer in members:
 		_rpc_room_state.rpc_id(
@@ -520,6 +583,31 @@ func _check_room_run_over(code: String) -> void:
 			_lobby.names_of(code)
 		)
 	lobby_event.emit("finished", code, sample)
+
+
+func _record_room_scores(code: String, logic) -> void:
+	## M7：一局结算时逐成员写榜（仅经大厅的在线局）。空用户名（未登录 / 未启用账号）
+	## 一律跳过，且不落盘。关卡进度与双榜（波次 / 技能）均在此一次性写入。
+	if _score_board == null or logic == null:
+		return
+	var at := int(Time.get_unix_time_from_system())
+	for peer in _lobby.members_of(code):
+		var uname := _username_of(int(peer))
+		if uname.is_empty() or not logic.has_player(int(peer)):
+			continue
+		var stats: Dictionary = logic.stats(int(peer))
+		var st: Dictionary = logic.skill_state(int(peer))
+		_score_board.record(
+			uname,
+			int(logic.level_id),
+			int(logic.difficulty_id),
+			int(logic.wave),
+			int(stats["kills"]),
+			float(stats["seconds"]),
+			int(stats["boss_kills"]),
+			(st["nodes"] as Array).size(),
+			at
+		)
 
 
 func _send_snapshots() -> void:
@@ -696,7 +784,9 @@ func _admit(id: int) -> void:
 	if int(info.get("role", Protocol.ROLE_PLAYER)) != Protocol.ROLE_PLAYER:
 		return
 	_host.add_player(id)
+	_host.set_initial_build(id)
 	_rpc_room.rpc_id(id, Protocol.encode_room(_host.room_walls))
+	_send_skill_state(id)
 	player_joined.emit(id)
 	_broadcast_peer_list()
 
@@ -764,6 +854,15 @@ func _broadcast_room_state(code: String) -> void:
 	var state := int(_lobby.state_of(code))
 	for peer in members:
 		_rpc_room_state.rpc_id(int(peer), code, _lobby.is_host(int(peer)), state, names)
+
+
+func _broadcast_room_config(code: String) -> void:
+	## SERVER：把房间当前关卡/难度下发房内全部成员（M7）；不做任何二进制帧改动。
+	if _lobby == null or code.is_empty():
+		return
+	var cfg: Dictionary = _lobby.config_of(code)
+	for peer in _lobby.members_of(code):
+		_rpc_room_config.rpc_id(int(peer), int(cfg["level_id"]), int(cfg["difficulty_id"]))
 
 
 # ---------------- RPC ----------------
@@ -1014,6 +1113,7 @@ func _rpc_room_create() -> void:
 		return
 	var code := String(res["code"])
 	_broadcast_room_state(code)
+	_broadcast_room_config(code)
 	lobby_event.emit("created", code, sender)
 
 
@@ -1035,6 +1135,7 @@ func _rpc_room_join(code: String) -> void:
 	if logic != null:
 		_rpc_room.rpc_id(sender, Protocol.encode_room(logic.room_walls))
 	_broadcast_room_state(joined)
+	_broadcast_room_config(joined)
 	lobby_event.emit("joined", joined, sender)
 
 
@@ -1086,9 +1187,31 @@ func _rpc_room_start() -> void:
 	var logic = _lobby.logic_of(code)
 	if logic != null:
 		for peer in _lobby.members_of(code):
+			logic.set_initial_build(int(peer))
 			_rpc_room.rpc_id(int(peer), Protocol.encode_room(logic.room_walls))
+			_send_room_skill_state(logic, int(peer))
 	_broadcast_room_state(code)
+	_broadcast_room_config(code)
 	lobby_event.emit("started", code, sender)
+
+
+@rpc("any_peer", "call_remote", "reliable", 0)
+func _rpc_room_config(level_id: int, difficulty_id: int) -> void:
+	## 复用为双向下发：SERVER 侧受理房主上行 → set_room_config → 广播；CLIENT 侧收到后 emit。
+	if mode == Mode.CLIENT:
+		room_config.emit(level_id, difficulty_id)
+		return
+	if mode != Mode.SERVER or _lobby == null:
+		return
+	var sender := multiplayer.get_remote_sender_id()
+	if sender == 0:
+		return
+	var res: Dictionary = _lobby.set_room_config(sender, level_id, difficulty_id)
+	if not bool(res["ok"]):
+		_rpc_room_error.rpc_id(sender, int(res["err"]))
+		return
+	_broadcast_room_config(String(res["code"]))
+	lobby_event.emit("config", String(res["code"]), sender)
 
 
 @rpc("authority", "call_remote", "reliable", 0)
@@ -1109,5 +1232,236 @@ func _rpc_room_error(err: int) -> void:
 	if mode != Mode.CLIENT:
 		return
 	room_error.emit(err)
+
+
+# ---------------- 榜单与关卡进度 RPC（M7，控制通道） ----------------
+
+@rpc("any_peer", "call_remote", "reliable", 0)
+func _rpc_progress_request() -> void:
+	if mode != Mode.SERVER or _score_board == null:
+		return
+	var sender := multiplayer.get_remote_sender_id()
+	if sender == 0:
+		return
+	_send_progress(sender)
+
+
+@rpc("authority", "call_remote", "reliable", 0)
+func _rpc_progress_data(cleared: PackedInt32Array, best_wave: PackedInt32Array) -> void:
+	if mode != Mode.CLIENT:
+		return
+	progress_data.emit(cleared, best_wave)
+
+
+@rpc("any_peer", "call_remote", "reliable", 0)
+func _rpc_leaderboard_request(board: int, difficulty_id: int) -> void:
+	if mode != Mode.SERVER or _score_board == null:
+		return
+	var sender := multiplayer.get_remote_sender_id()
+	if sender == 0:
+		return
+	_send_leaderboard(sender, board, difficulty_id)
+
+
+@rpc("authority", "call_remote", "reliable", 0)
+func _rpc_leaderboard_data(board: int, difficulty_id: int, rows: Array) -> void:
+	if mode != Mode.CLIENT:
+		return
+	leaderboard_data.emit(board, difficulty_id, rows)
+
+
+func _send_progress(peer: int) -> void:
+	var prog: Dictionary = _score_board.progress_of(_username_of(peer))
+	_rpc_progress_data.rpc_id(peer, prog["cleared"], prog["best_wave"])
+
+
+func _send_leaderboard(peer: int, board: int, difficulty_id: int) -> void:
+	var rows: Array = []
+	if board == Protocol.BOARD_SKILL:
+		rows = _score_board.leaderboard_skill()
+	elif board == Protocol.BOARD_WAVE:
+		rows = _score_board.leaderboard_wave(difficulty_id)
+	_rpc_leaderboard_data.rpc_id(peer, board, difficulty_id, rows)
+
+
+# ---------------- 技能树与动态特效（子项目 5） ----------------
+
+
+func local_skill_state() -> Dictionary:
+	## UI 读取当前玩家的技能树状态：HOST 取权威，CLIENT 取最近一次下发副本。
+	if mode == Mode.HOST:
+		if _host.has_player(1):
+			return _host.skill_state(1)
+		return {"points": 0, "nodes": []}
+	if mode == Mode.CLIENT:
+		return {"points": _skill_points, "nodes": _skill_nodes.duplicate()}
+	return {"points": 0, "nodes": []}
+
+
+func send_skill_unlock(node_id: int) -> void:
+	## UI 解锁技能节点：客户端上行请求，主机本地直接结算。
+	if mode == Mode.CLIENT:
+		_rpc_skill_unlock.rpc_id(1, node_id)
+	elif mode == Mode.HOST:
+		if _host.unlock_skill(1, node_id):
+			_emit_local_skill_state()
+			player_skill_unlock.emit(1, node_id)
+
+
+func set_local_build(preset_id: String = "") -> void:
+	## 更换本地玩家的初始构筑（技能树起点），仅 HOST 生效。
+	if mode == Mode.HOST and _host.has_player(1):
+		_host.set_initial_build(1, preset_id)
+		_emit_local_skill_state()
+
+
+func _emit_local_skill_state() -> void:
+	var st := local_skill_state()
+	skill_state_changed.emit(int(st["points"]), PackedInt32Array(st["nodes"]))
+
+
+func _send_skill_state(peer: int) -> void:
+	var st: Dictionary = _host.skill_state(peer)
+	_rpc_skill_state.rpc_id(peer, int(st["points"]), PackedInt32Array(st["nodes"]))
+
+
+func _send_room_skill_state(logic, peer: int) -> void:
+	var st: Dictionary = logic.skill_state(peer)
+	_rpc_skill_state.rpc_id(peer, int(st["points"]), PackedInt32Array(st["nodes"]))
+
+
+func _dispatch_host_fx() -> void:
+	## HOST：本帧特效本地直显（非专服）并广播给远端 peer。
+	var evs := _host.take_fx_events()
+	if evs.is_empty():
+		return
+	var alive := multiplayer.get_peers()  # 已断开的对端 ready_state != STATE_OPEN，发了会逐帧刷屏报错
+	for ev in evs:
+		var k := int(ev["kind"])
+		var pos: Vector2 = ev["pos"]
+		var radius := float(ev["radius"])
+		var dir: Vector2 = ev.get("dir", Vector2.ZERO)  # 方向性特效（激光/吸血）用
+		if not dedicated:
+			fx.emit(k, pos, dir, radius)
+		for peer in _host.peer_ids():
+			if peer == 1 or not alive.has(peer):
+				continue
+			_rpc_fx.rpc_id(peer, k, pos, dir, radius)
+
+
+func _dispatch_room_fx() -> void:
+	## SERVER：逐房把本帧特效广播给房内全部成员。
+	if _lobby == null:
+		return
+	var alive := multiplayer.get_peers()  # 已断开的对端 ready_state != STATE_OPEN，发了会逐帧刷屏报错
+	for code in _lobby.running_rooms():
+		var logic = _lobby.logic_of(String(code))
+		if logic == null:
+			continue
+		var evs: Array = logic.take_fx_events()
+		if evs.is_empty():
+			continue
+		var members: PackedInt32Array = _lobby.members_of(String(code))
+		for peer in members:
+			if peer == 1 or not alive.has(peer):
+				continue
+			for ev in evs:
+				_rpc_fx.rpc_id(
+					int(peer),
+					int(ev["kind"]),
+					ev["pos"],
+					ev.get("dir", Vector2.ZERO),
+					float(ev["radius"])
+				)
+
+
+func _dispatch_host_elements() -> void:
+	## HOST：把元素状态同步给本机渲染（非专服）与远端 peer；空列表直接跳过，客户端靠 TTL 自行褪色。
+	var ids := PackedInt32Array()
+	var elems := PackedByteArray()
+	for it in _host.element_states():
+		ids.append(int(it["id"]))
+		elems.append(int(it["elem"]))
+	if ids.is_empty():
+		return
+	if not dedicated:
+		enemy_elements.emit(ids, elems)
+	var alive := multiplayer.get_peers()  # 已断开的对端发了会逐帧刷屏报错
+	for peer in _host.peer_ids():
+		if peer == 1 or not alive.has(peer):
+			continue
+		_rpc_enemy_elements.rpc_id(peer, ids, elems)
+
+
+func _dispatch_room_elements() -> void:
+	## SERVER：逐房把元素状态同步给房内成员（同样只在有元素时发）。
+	if _lobby == null:
+		return
+	var alive := multiplayer.get_peers()
+	for code in _lobby.running_rooms():
+		var logic = _lobby.logic_of(String(code))
+		if logic == null:
+			continue
+		var ids := PackedInt32Array()
+		var elems := PackedByteArray()
+		for it in logic.element_states():
+			ids.append(int(it["id"]))
+			elems.append(int(it["elem"]))
+		if ids.is_empty():
+			continue
+		var members: PackedInt32Array = _lobby.members_of(String(code))
+		for peer in members:
+			if peer == 1 or not alive.has(peer):
+				continue
+			_rpc_enemy_elements.rpc_id(int(peer), ids, elems)
+
+
+@rpc("any_peer", "call_remote", "reliable", 0)
+func _rpc_skill_unlock(node_id: int) -> void:
+	var sender := multiplayer.get_remote_sender_id()
+	if mode == Mode.SERVER:
+		if sender == 0 or _lobby == null:
+			return
+		var code: String = _lobby.room_of(sender)
+		if code.is_empty():
+			return
+		var logic = _lobby.logic_of(code)
+		if logic == null:
+			return
+		if logic.unlock_skill(sender, node_id):
+			player_skill_unlock.emit(sender, node_id)
+			_send_room_skill_state(logic, sender)
+		return
+	if mode != Mode.HOST:
+		return
+	if sender == 0 or sender == 1:
+		return
+	if _host.unlock_skill(sender, node_id):
+		player_skill_unlock.emit(sender, node_id)
+		_send_skill_state(sender)
+
+
+@rpc("authority", "call_remote", "reliable", 0)
+func _rpc_skill_state(points: int, nodes: PackedInt32Array) -> void:
+	if mode != Mode.CLIENT:
+		return
+	_skill_points = points
+	_skill_nodes = Array(nodes)
+	skill_state_changed.emit(points, nodes)
+
+
+@rpc("authority", "call_remote", "unreliable", 1)
+func _rpc_fx(kind: int, pos: Vector2, dir: Vector2, radius: float) -> void:
+	if mode != Mode.CLIENT:
+		return
+	fx.emit(kind, pos, dir, radius)
+
+
+@rpc("authority", "call_remote", "unreliable", 1)
+func _rpc_enemy_elements(ids: PackedInt32Array, elems: PackedByteArray) -> void:
+	## 元素状态走独立稀疏通道（不动快照线格式）；丢包由「按快照节拍重发 + 客户端 TTL」自愈。
+	if mode != Mode.CLIENT:
+		return
+	enemy_elements.emit(ids, elems)
 
 # gdlint:ignore=max-file-lines

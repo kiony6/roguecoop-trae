@@ -3,6 +3,16 @@ extends Node2D
 ## 避免插值带来的明显滞后；主机直连权威位置。
 
 const Weapons := preload("res://sim/weapons.gd")
+const Skills := preload("res://sim/skills.gd")
+
+const SKILL_COLORS := {
+	Skills.PROJ_DATA: Color("4aa3ff"),  # 数据弹
+	Skills.PROJ_LASER: Color("a8e0ff"),  # 激光
+	Skills.PROJ_SPLIT: Color("ffd93d"),  # 分叉弹
+	Skills.PROJ_HOMING: Color("ff8a3d"),  # 追踪导弹
+	Skills.PROJ_MINE: Color("b06bff"),  # 数据雷
+	Skills.PROJ_SPIKE: Color("9fe8ff"),  # 尖刺弹
+}
 
 var proj_id := 0
 var kind := 0
@@ -42,17 +52,32 @@ func _physics_process(_delta: float) -> void:
 		return
 	if Net.is_client():
 		var dt := (float(Time.get_ticks_msec()) - _recv_ms) / 1000.0
-		position = _auth + _dir.normalized() * Weapons.speed(kind) * dt
+		position = _auth + _dir.normalized() * _speed() * dt
 	else:
 		position = _auth
 
 
+func _speed() -> float:
+	## 技能弹（kind 8+）走技能弹表，武器弹回退 Weapons。
+	var info := Skills.projectile(kind)
+	if not info.is_empty():
+		return float(info["speed"])
+	return Weapons.speed(kind)
+
+
 func _draw() -> void:
-	var r := Weapons.radius(kind)
-	var col := Color("a8e0ff")
-	if kind == Weapons.KIND_SHOTGUN:
-		col = Color("ffe9a8")
-	elif kind == Weapons.KIND_RIFLE:
-		col = Color("ffd0f0")
+	var r := Skills.projectile_radius(kind)
+	var col := _color()
 	draw_circle(Vector2.ZERO, r, col)
 	draw_arc(Vector2.ZERO, r, 0.0, TAU, 16, col.darkened(0.4), 1.5)
+	if kind >= Skills.PROJ_DATA:
+		# 技能弹加一段拖尾，与武器弹区分开
+		draw_line(Vector2.ZERO, -_dir.normalized() * r * 2.2, Color(col, 0.45), r * 1.2)
+
+
+func _color() -> Color:
+	if kind == Weapons.KIND_SHOTGUN:
+		return Color("ffe9a8")
+	if kind == Weapons.KIND_RIFLE:
+		return Color("ffd0f0")
+	return SKILL_COLORS.get(kind, Color("a8e0ff"))

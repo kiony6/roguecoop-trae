@@ -93,7 +93,8 @@ while ((Get-Date) -lt $deadline) {
 $uF = "f" + (Get-Random -Minimum 100000 -Maximum 999999)
 $fullProc = New-LobbyClient "full" @("--stage=full", "--user=$uF", "--pass=$pass", "--code=$code", "--delay=1")
 
-$hostProc.WaitForExit(150000) | Out-Null
+# 与客户端 HOST_TIMEOUT=200s 对齐：单局时长随地图种子波动，launcher 不能早于客户端预算放弃
+$hostProc.WaitForExit(210000) | Out-Null
 foreach ($p in $seatProcs) { $p.WaitForExit(60000) | Out-Null }
 $fullProc.WaitForExit(60000) | Out-Null
 

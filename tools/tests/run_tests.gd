@@ -22,6 +22,15 @@ const SUITES: Array = [
 	preload("res://tools/tests/test_account_server.gd"),
 	preload("res://tools/tests/test_lobby.gd"),
 	preload("res://tools/tests/test_lobby_server.gd"),
+	preload("res://tools/tests/test_skills.gd"),
+	preload("res://tools/tests/test_skill_runtime.gd"),
+	preload("res://tools/tests/test_skill_logic.gd"),
+	preload("res://tools/tests/test_fx_kinds.gd"),
+	preload("res://tools/tests/test_enemy_element.gd"),
+	preload("res://tools/tests/test_fx_chain.gd"),
+	preload("res://tools/tests/test_levels.gd"),
+	preload("res://tools/tests/test_score_board.gd"),
+	preload("res://tools/tests/test_run_config.gd"),
 ]
 
 

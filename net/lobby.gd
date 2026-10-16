@@ -24,11 +24,14 @@ enum ERR {
 }
 
 const Protocol := preload("res://net/protocol.gd")
+const Levels := preload("res://sim/levels.gd")
 const MAX_ROOMS := 4  # 单进程房间上限
 const ROOM_CODE_MIN := 100000
 const ROOM_CODE_MAX := 999999  # 6 位数字码，首位非 0
 const EMPTY_ROOM_TTL_S := 120.0  # 房内无成员持续这么久即销毁
 const ROOMS_CAPACITY := MAX_ROOMS * Protocol.MAX_PLAYERS  # 传给 create_server 的客户端上限（=16）
+const DEFAULT_LEVEL := Levels.DEFAULT_LEVEL  # 新房间默认关卡（区域 1）
+const DEFAULT_DIFFICULTY := Levels.DEFAULT_DIFFICULTY  # 新房间默认难度（普通）
 const _CODE_RANDOM_TRIES := 64
 
 

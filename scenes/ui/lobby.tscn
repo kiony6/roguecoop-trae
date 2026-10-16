@@ -69,6 +69,10 @@ text = "加入"
 theme_type_variation = &"TextButton"
 text = "退出登录"
 
+[node name="LeaderboardButton" type="Button" parent="Center/Card/Box"]
+theme_type_variation = &"TextButton"
+text = "排行榜"
+
 [node name="Status" type="Label" parent="Center/Card/Box"]
 theme_type_variation = &"Caption"
 horizontal_alignment = 1

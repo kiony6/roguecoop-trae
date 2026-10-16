@@ -1,9 +1,11 @@
-extends RefCounted
+extends RefCounted  # gdlint:ignore=max-public-methods
 ## 大厅服务端（单进程多房间）纯逻辑：房间表 + peer→房间 路由 + 房间生命周期 +
 ## 每房独立 NetHostLogic 驱动。不含任何网络/磁盘依赖，也不发任何 RPC；
 ## 由 autoload/net.gd 在 SERVER 模式驱动，收发 RPC 与房间广播均由 net.gd 执行。
+## 注：房间表查询/配置/生命周期等公共方法数必然超过 gdlint 默认上限 20，故第 1 行显式豁免。
 
 const Lobby := preload("res://net/lobby.gd")
+const Levels := preload("res://sim/levels.gd")
 const NetHostLogic := preload("res://net/net_host.gd")
 const Protocol := preload("res://net/protocol.gd")
 
@@ -51,6 +53,8 @@ func create_room(peer: int) -> Dictionary:
 		"state": Lobby.STATE.WAITING,
 		"logic": null,
 		"empty_seconds": 0.0,
+		"level_id": Lobby.DEFAULT_LEVEL,
+		"difficulty_id": Lobby.DEFAULT_DIFFICULTY,
 	}
 	_rooms[code] = room
 	_peer_room[peer] = code
@@ -108,6 +112,44 @@ func finish_run(code: String) -> void:
 
 func room_of(peer: int) -> String:
 	return String(_peer_room.get(peer, ""))
+
+
+func set_room_config(peer: int, new_level_id: int, new_difficulty_id: int) -> Dictionary:
+	## 房主在等待期选择关卡与难度；开局后锁定（BAD_STATE），避免局中改配置造成数值跳变。
+	var code := room_of(peer)
+	if code.is_empty():
+		return {"ok": false, "err": Lobby.ERR.NOT_IN_ROOM, "code": ""}
+	if not is_host(peer):
+		return {"ok": false, "err": Lobby.ERR.NOT_HOST, "code": code}
+	if not Levels.is_valid_level(new_level_id) or not Levels.is_valid_difficulty(new_difficulty_id):
+		return {"ok": false, "err": Lobby.ERR.INTERNAL, "code": code}
+	var room: Dictionary = _rooms[code]
+	if int(room["state"]) != Lobby.STATE.WAITING:
+		return {"ok": false, "err": Lobby.ERR.BAD_STATE, "code": code}
+	room["level_id"] = new_level_id
+	room["difficulty_id"] = new_difficulty_id
+	var logic: NetHostLogic = room["logic"]
+	if logic != null:
+		logic.set_run_config(new_level_id, new_difficulty_id)
+	return {"ok": true, "err": Lobby.ERR.OK, "code": code}
+
+
+func level_of(code: String) -> int:
+	if not _rooms.has(code):
+		return Lobby.DEFAULT_LEVEL
+	return int(_rooms[code]["level_id"])
+
+
+func difficulty_of(code: String) -> int:
+	if not _rooms.has(code):
+		return Lobby.DEFAULT_DIFFICULTY
+	return int(_rooms[code]["difficulty_id"])
+
+
+func config_of(code: String) -> Dictionary:
+	if not _rooms.has(code):
+		return {"level_id": Lobby.DEFAULT_LEVEL, "difficulty_id": Lobby.DEFAULT_DIFFICULTY}
+	return {"level_id": level_of(code), "difficulty_id": difficulty_of(code)}
 
 
 func is_host(peer: int) -> bool:
@@ -205,6 +247,7 @@ func _username(peer: int) -> String:
 func _reset_room_logic(room: Dictionary) -> void:
 	var logic: NetHostLogic = NetHostLogic.new()
 	logic.reset(true, _new_seed())
+	logic.set_run_config(int(room["level_id"]), int(room["difficulty_id"]))
 	room["logic"] = logic
 
 
